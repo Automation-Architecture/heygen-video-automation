@@ -22,17 +22,30 @@ This is a golf community. Jeff is the founder. Videos are short, conversational 
 
 Present the user with this list and ask which avatar they want:
 
-| # | Avatar | ID |
-|---|--------|-----|
-| 1 | Jeff | `185ac6a5133141cdbe5ad30729dfb0b5` |
-| 2 | Bob Commentator | `924e085127e14867814dc5f99d2f6419` |
-| 3 | Bud The Caddy | `35a38a2bfbfe4d5ea33f1a8b8434aa06` |
-| 4 | Pro Golfer | `1fd5fe07a84749fc88143d0640841d46` |
-| 5 | Golf Cart Girl | `fee86c5c0bbe45f7954d2bd31046b6f9` |
+| # | Avatar | ID | Status |
+|---|--------|-----|--------|
+| 1 | Jeff | `ccce0126b55f418e858ce9c7047eff1a` | ✓ verified |
+| 2 | Bob Commentator | `924e085127e14867814dc5f99d2f6419` | ✓ verified |
+| 3 | Bud The Caddy | `35a38a2bfbfe4d5ea33f1a8b8434aa06` | ✓ verified |
+| 4 | Pro Golfer | `1fd5fe07a84749fc88143d0640841d46` | ✓ verified |
+| 5 | Golf Cart Girl | `fee86c5c0bbe45f7954d2bd31046b6f9` | ✓ verified |
 
 Ask: "Which avatar would you like to use for this video?"
 
-Wait for the user to confirm before proceeding. Use the selected `avatar_id` in Step 2.
+Wait for the user to confirm. Then immediately run **Step 0.5** before any script work.
+
+### Step 0.5: Validate Avatar ID
+
+Run this immediately after the user picks an avatar:
+
+```bash
+HEYGEN_API_KEY=<key> python3 execution/validate_avatar_id.py <avatar_id>
+```
+
+- **Exit 0 (found):** proceed to Step 1.
+- **Exit 1 (not found):** stop. Tell the user the avatar ID is not on their HeyGen account and ask them to verify it in the HeyGen dashboard or pick a different avatar. Do NOT proceed to script work or video generation with an unverified avatar ID.
+
+Use the confirmed `avatar_id` in Step 2.
 
 Each avatar has a pre-configured voice in HeyGen — no `voice_id` needed.
 
@@ -118,4 +131,4 @@ window and automatically retry. Total render time is typically 5–10 minutes fo
 - Video URLs are pre-signed and expire after 7 days (Video Agent) vs 24 hours (v2)
 - Avatar/voice catalog is cached in `.tmp/heygen_catalog.json`; run with `--refresh` to force an update
 - Video Agent does not support `voice_id` — voice is determined by the avatar
-- Jeff's custom avatar (`185ac6a5133141cdbe5ad30729dfb0b5`) automatically uses his cloned voice
+- Jeff's custom avatar (`ccce0126b55f418e858ce9c7047eff1a`) automatically uses his cloned voice

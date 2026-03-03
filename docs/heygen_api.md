@@ -167,6 +167,21 @@ Single natural-language `prompt` drives the entire production — script, visual
 
 Poll with `/v1/video_status.get`. Expect 404 for the first ~4 minutes (normal — video is indexing). Total render time: 5–10 minutes for short videos. URLs expire after 7 days.
 
+### Talking Photos and the Video Agent
+
+Four of the five GU avatars are "talking photos" (Bob Commentator, Bud The Caddy, Pro Golfer, Golf Cart Girl). Jeff is the only standard avatar.
+
+**⚠ Not yet tested:** Whether the Video Agent endpoint accepts talking photo IDs as `config.avatar_id` is unconfirmed. The Video Agent is a higher-level API that may handle both types transparently — or it may not.
+
+**If Video Agent fails for a talking photo avatar**, the fallback is `/v2/video/generate` with explicit talking photo parameters:
+- `character.type: "talking_photo"`
+- `character.talking_photo_id: "<id>"`
+- `character.talking_photo_style: "circle"`
+- `character.talking_style: "expressive"`
+- `character.expression: "default"`
+
+Ref: https://docs.heygen.com/reference/create-an-avatar-video-v2
+
 ---
 
 ### Prompt Engineering for Video Agent

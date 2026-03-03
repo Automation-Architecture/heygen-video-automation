@@ -51,7 +51,7 @@
 ```
 Golfers Unite golf community update video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
 
-Avatar: Jeff, founder of Golfers Unite — a modern golf culture and membership community. Use the provided custom avatar.
+Avatar (REQUIRED): Use ONLY custom avatar ID 185ac6a5133141cdbe5ad30729dfb0b5. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
 
 Script (deliver this spoken content exactly):
 "[INSERT APPROVED SCRIPT HERE]"
@@ -126,7 +126,7 @@ Visual style: Clean, minimal portrait video. Modern golf aesthetic — editorial
 ```
 Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
 
-Avatar: Bob, a veteran Tour announcer with five decades on the mic. Use the provided custom avatar.
+Avatar (REQUIRED): Use ONLY custom avatar ID 924e085127e14867814dc5f99d2f6419. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
 
 Script (deliver this spoken content exactly):
 "[INSERT APPROVED SCRIPT HERE]"
@@ -204,7 +204,7 @@ Bud has been on the bag for thirty years, working private clubs up and down the 
 ```
 Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
 
-Avatar: Bud, a career caddy — thirty years on the bag, Nantucket summers, Palm Beach winters. Use the provided custom avatar.
+Avatar (REQUIRED): Use ONLY custom avatar ID 35a38a2bfbfe4d5ea33f1a8b8434aa06. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
 
 Script (deliver this spoken content exactly):
 "[INSERT APPROVED SCRIPT HERE]"
@@ -282,7 +282,7 @@ He's been grinding for this his entire life. Mini-tours, Q-School, Korn Ferry �
 ```
 Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
 
-Avatar: A rookie Tour pro who just earned his card — focused, disciplined, all business. Use the provided custom avatar.
+Avatar (REQUIRED): Use ONLY custom avatar ID 1fd5fe07a84749fc88143d0640841d46. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
 
 Script (deliver this spoken content exactly):
 "[INSERT APPROVED SCRIPT HERE]"
@@ -360,7 +360,7 @@ She runs the cart, she knows everyone's drink order, and she will absolutely roa
 ```
 Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
 
-Avatar: The beverage cart girl — smirking, light, completely unbothered. Use the provided custom avatar.
+Avatar (REQUIRED): Use ONLY custom avatar ID fee86c5c0bbe45f7954d2bd31046b6f9. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
 
 Script (deliver this spoken content exactly):
 "[INSERT APPROVED SCRIPT HERE]"

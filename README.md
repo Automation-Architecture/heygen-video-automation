@@ -14,13 +14,13 @@ You start a conversation in Claude Code, say what video you want (or just say "m
 
 ## Avatars
 
-| # | Avatar | Character |
-|---|--------|-----------|
-| 1 | **Jeff** | Golfers Unite founder — friendly, direct, like a friend at the clubhouse |
-| 2 | **Bob Commentator** | Senior Tour announcer — grave, authoritative, five decades on the mic |
-| 3 | **Bud The Caddy** | Career looper — irreverent, funny, unfiltered |
-| 4 | **Pro Golfer** | Rookie Tour pro — focused, disciplined, earned his card the hard way |
-| 5 | **Golf Cart Girl** | Beverage cart — playful, punchy, always smirking |
+| # | Avatar | Character | HeyGen ID |
+|---|--------|-----------|-----------|
+| 1 | **Jeff** | Golfers Unite founder — friendly, direct, like a friend at the clubhouse | `ccce0126b55f418e858ce9c7047eff1a` |
+| 2 | **Bob Commentator** | Senior Tour announcer — grave, authoritative, five decades on the mic | `924e085127e14867814dc5f99d2f6419` |
+| 3 | **Bud The Caddy** | Career looper — irreverent, funny, unfiltered | `35a38a2bfbfe4d5ea33f1a8b8434aa06` |
+| 4 | **Pro Golfer** | Rookie Tour pro — focused, disciplined, earned his card the hard way | `1fd5fe07a84749fc88143d0640841d46` |
+| 5 | **Golf Cart Girl** | Beverage cart — playful, punchy, always smirking | `fee86c5c0bbe45f7954d2bd31046b6f9` |
 
 Each avatar has a pre-configured voice in HeyGen (no `voice_id` needed) and a full cinematic production template defined in `directives/avatar_personas.md` — 4-scene structure, camera angle direction (drone, low-angle, gallery POV), lighting guidance (natural sunlight, dappled shadows), persona-specific on-course locations, and a venue context slot that gets filled with the specific tournament location for every video.
 
@@ -60,6 +60,7 @@ directives/
   avatar_personas.md       # Character profiles, tone guides, visual defaults
 
 execution/
+  validate_avatar_id.py       # Confirms avatar ID exists on account (checks avatars + talking photos)
   list_heygen_avatars.py      # Discovers custom avatars/voices, caches 24h
   generate_heygen_video.py    # Submits job to HeyGen Video Agent, returns video_id
   poll_heygen_video.py        # Polls HeyGen until video is ready, prints URL
