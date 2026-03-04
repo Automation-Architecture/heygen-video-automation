@@ -11,7 +11,7 @@ Given a topic or script, produce a HeyGen avatar video and return the video URL.
 | `orientation` | No | `portrait` | Portrait (9:16) for social; landscape (16:9) for web |
 | `title` | No | First 50 chars of script | Used for reference |
 
-Note: `voice_id` is no longer an input. Video Agent determines voice from the avatar automatically. Jeff's custom avatar uses his cloned voice.
+Note: `voice_id` is only required for the fast-path (V2) render. Video Agent determines voice from the avatar automatically — no `voice_id` needed for the cinematic path. Voice IDs for all avatars are defined in `directives/avatar_personas.md`.
 
 ## Community Context
 This is a golf community. Jeff is the founder. Videos are short, conversational check-ins about upcoming PGA Tour events, tournament news, and community updates. Jeff's tone is friendly, knowledgeable, and direct — like he's talking to a friend at the clubhouse.
@@ -64,25 +64,61 @@ a quick single draft:
 2. Write ~45 words in the selected avatar's voice from `directives/avatar_personas.md`
 3. Present for approval, incorporate feedback, lock in the final script
 
-## Step 2: Build the Prompt and Trigger the Workflow
+## Step 2: Choose Render Path and Trigger the Workflow
 
 Use the avatar selected in Step 0 and the approved script from Step 1.
 
-### Building the prompt
+**Ask the user which render path they want:**
 
-Each avatar has a ready-to-use `### Video Agent Prompt` section in `directives/avatar_personas.md`. Find the selected avatar's entry, copy its prompt template verbatim, then make two substitutions:
+| | Fast Path (Avatar IV / V2) | Cinematic Path (Video Agent) |
+|---|---|---|
+| Render time | **~1 min** | 12–30 min |
+| Output | Single-scene talking head | Multi-scene: drone open → avatar → B-roll → branded outro |
+| Avatar motion | Photorealistic (Avatar IV engine) | Basic lip-sync (talking photos) |
+| Voice | Explicit voice_id required | Auto from avatar |
 
-1. Replace `[INSERT APPROVED SCRIPT HERE]` with the approved script.
-2. Replace `[INSERT TOURNAMENT VENUE CONTEXT HERE]` with the `venue_context` from the script handoff (Step 5 of `create_script.md`).
+If the user doesn't specify, ask: "Fast (~1 min, single talking head) or Cinematic (12–30 min, multi-scene with B-roll and branded outro)?"
 
-**If no venue context is available** (e.g., user provided a script directly without going through research), use this generic fallback:
-> "A PGA Tour venue — manicured fairways, well-groomed bentgrass greens, natural course beauty with galleries lining the holes. Classic parkland feel with sunlight through tree-lined corridors."
+---
 
-The venue context grounds the B-roll and scenery in the specific tournament location. It's what makes Bay Hill look like Bay Hill and Augusta look like Augusta — not a generic course.
+### Fast Path: Avatar IV / V2
 
-### Trigger call
+Each avatar's `Voice ID (fast-path)` and `### Fast-Path (V2) Motion Prompt` are in `directives/avatar_personas.md`.
 
-Run the direct HeyGen script. Capture the `video_id` from stdout and pass it to Step 3.
+Pass the approved script verbatim — do **not** append the cinematic suffix.
+
+```bash
+HEYGEN_API_KEY=<key> python3 execution/generate_heygen_video_v2.py \
+  --avatar_id "<avatar_id>" \
+  --avatar_type "<avatar|talking_photo>" \
+  --voice_id "<voice_id>" \
+  --script "<approved script text>" \
+  --orientation portrait
+```
+
+Avatar types:
+- Jeff → `--avatar_type avatar`
+- Bob, Bud, Pro Golfer, Golf Cart Girl → `--avatar_type talking_photo`
+
+On success, prints `{ "video_id": "<id>" }`. Pass to Step 3.
+
+---
+
+### Cinematic Path: Video Agent
+
+**⚠ Hard limit: 245 chars total.** Video Agent silently rejects longer prompts — it returns a `video_id` but the video never renders (persistent 404). Count characters before submitting.
+
+Each avatar has a compact `### Video Agent Prompt` template in `directives/avatar_personas.md`. The template is structured as:
+
+```
+[SCRIPT] [CINEMATIC SUFFIX]
+```
+
+Where the cinematic suffix (~55–65 chars) encodes the 4-scene structure (B-roll open → avatar A-roll → energy B-roll → branded outro) in a tight phrase. To build the final prompt:
+
+1. Take the approved script and tighten it to fit within the avatar's script budget (total - suffix length). Drop contractions, trim filler, preserve all key facts and the persona's voice.
+2. Append the avatar's cinematic suffix verbatim.
+3. Count total characters. Must be ≤ 245.
 
 ```bash
 HEYGEN_API_KEY=<key> python3 execution/generate_heygen_video.py \
@@ -91,12 +127,7 @@ HEYGEN_API_KEY=<key> python3 execution/generate_heygen_video.py \
   --orientation portrait
 ```
 
-On success, this prints:
-```json
-{ "video_id": "<id>" }
-```
-
-Extract the `video_id` from that output and use it in Step 3. The script exits non-zero on any error.
+On success, prints `{ "video_id": "<id>" }`. Pass to Step 3.
 
 ## Step 3: Poll for Completion (run immediately after triggering)
 
@@ -108,9 +139,33 @@ HEYGEN_API_KEY=<key> python3 execution/poll_heygen_video.py <video_id>
 
 This polls every 15 seconds and prints the video URL when ready.
 
-**Important timing note:** Video Agent videos take ~3–4 minutes before they become queryable.
-The polling script handles this gracefully — it will log "indexing (404)" during the initial
-window and automatically retry. Total render time is typically 5–10 minutes for short videos.
+**Important timing note:** Video Agent rendering takes **12–30 minutes** when the queue is busy.
+The polling script handles the initial 404 window gracefully — it logs "indexing (404)" and retries.
+Do NOT assume a job failed just because it's still 404 at 10 minutes. The poll script now waits up
+to 30 minutes. If it times out, check the HeyGen dashboard or `video.list` — the video may have
+rendered after the timeout window.
+
+## Step 4: Notify Slack
+
+After Step 3 completes, post to **#crm-uat** using the Slack MCP.
+
+**On success:**
+```
+✅ GU Avatar Video Ready
+Avatar: <avatar name>
+Topic: <topic or first ~50 chars of script>
+▶️ <video_url>
+```
+
+**On failure or timeout:**
+```
+❌ GU Avatar Video Failed
+Avatar: <avatar name>
+Topic: <topic or first ~50 chars of script>
+Error: <error message or "timeout — check HeyGen dashboard">
+```
+
+Use the `conversations_add_message` tool from the `slack` MCP to post the message to channel `#crm-uat`. The bot must be invited to that channel for the post to succeed.
 
 ## Expected Output
 ```json
@@ -123,12 +178,12 @@ window and automatically retry. Total render time is typically 5–10 minutes fo
 
 ## Error Cases
 - **Rendering failed**: Script exits with status `failed` and the error message.
-- **Timeout (>10 min)**: Script exits with `timeout` — check HeyGen dashboard directly.
+- **Timeout (>30 min)**: Script exits with `timeout` — check HeyGen dashboard directly.
 - **Script trigger fails**: Check `HEYGEN_API_KEY` is set and the avatar_id is a valid HeyGen UUID.
 
 ## Notes
-- Video Agent rendering typically takes 5–10 minutes (longer than v2 due to scene production)
-- Video URLs are pre-signed and expire after 7 days (Video Agent) vs 24 hours (v2)
-- Avatar/voice catalog is cached in `.tmp/heygen_catalog.json`; run with `--refresh` to force an update
+- **Fast path (V2):** ~1 min render, Avatar IV photorealistic motion, explicit `voice_id` required
+- **Cinematic path (Video Agent):** 12–30 min render, multi-scene production (drone + B-roll + outro), voice auto from avatar
+- Video URLs expire after 7 days (both paths)
 - Video Agent does not support `voice_id` — voice is determined by the avatar
-- Jeff's custom avatar (`ccce0126b55f418e858ce9c7047eff1a`) automatically uses his cloned voice
+- Voice IDs for all avatars are in `directives/avatar_personas.md`; also discoverable via `execution/list_heygen_voices.py`
