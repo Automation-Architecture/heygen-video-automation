@@ -14,9 +14,36 @@
 
 ---
 
+## Fast-Path Voice Notes
+
+**Jeff's voice** (`58aef04cd30741e9ac705f9a6ce0d907`) is his cloned voice — confirmed accessible for video generation.
+
+**Other custom voices** visible in `list_heygen_voices.py` (Brooks, Nicholas, Ricky, Annie variants, Gabriela) appear to belong to other team members and return `TTS_VOICE_UNAVAILABLE_ERR`. Use stock HeyGen voices (those with a `preview_audio` URL) for all non-Jeff avatars. The voice IDs listed per avatar below are stock voices selected for persona fit.
+
+To discover available stock voices: `python3 execution/list_heygen_voices.py --all`
+
+---
+
+## Video Agent Prompt Format
+
+Each avatar has a compact `### Video Agent Prompt` template: a tightened script + a ~60-char cinematic suffix encoding 4 visual beats (drone/wide open → avatar course-side → energy B-roll → branded outro). Current templates target ~220 chars total.
+
+**Prompt length testing in progress.** We know ~220 chars works reliably. We know ~2600 chars appeared to fail (those jobs never appeared in the video list). A 1472-char prompt rendered successfully. The true ceiling is unknown — we're deliberately starting compact and expanding the suffix with each new video to probe the limit. When a longer suffix works, update the template and note the new confirmed ceiling here.
+
+| Chars tested | Result | Date |
+|---|---|---|
+| ~244 | ✓ renders reliably | 2026-03-03 |
+| ~900 | 🧪 testing — expanded cinematic prompt (natural script + scene-by-scene visual direction) | 2026-03-03 |
+| ~1472 | ✓ rendered once | 2026-03-03 |
+| ~2600 | ✗ never appeared in list | 2026-03-03 |
+
+---
+
 ## Jeff
 
-**Avatar ID:** `185ac6a5133141cdbe5ad30729dfb0b5`
+**Avatar ID:** `ccce0126b55f418e858ce9c7047eff1a`
+**Avatar Type:** `avatar` (standard)
+**Voice ID (fast-path):** `58aef04cd30741e9ac705f9a6ce0d907` (jeff — cloned voice)
 **Role:** Golf community founder
 
 ### Tone & Style
@@ -48,50 +75,28 @@
 - **Voice:** Determined automatically by HeyGen from avatar — do NOT pass `voice_id`.
 
 ### Video Agent Prompt
+
 ```
-Golfers Unite golf community update video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
-
-Avatar (REQUIRED): Use ONLY custom avatar ID 185ac6a5133141cdbe5ad30729dfb0b5. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
-
-Script (deliver this spoken content exactly):
-"[INSERT APPROVED SCRIPT HERE]"
-
-Tournament venue:
-[INSERT TOURNAMENT VENUE CONTEXT HERE]
-Ground all scenery, B-roll, and backgrounds in this specific venue. Make it feel like you're there — not a generic studio, not a generic course.
-
-Scene 1 [B-roll, no VO, ~3s]:
-Cinematic venue opening. Start with an aerial drone shot of the full course — wide, sweeping, golden light. Cut to a low-angle ground-level fairway shot: sunlight filtering through tree-lined fairways, long morning shadows stretching across the grass. No avatar, no text. Pure course beauty.
-
-Scene 2 [A-roll, ~14s]:
-Jeff delivers the full script. He's positioned at the venue — clubhouse exterior, course-side, or on the edge of the fairway. Portrait framing, well-lit with natural or warm artificial light. Slight background bokeh; Jeff is clearly the focus. Background suggests the tournament, not a studio. Keep him centered and visible throughout.
-
-Scene 3 [B-roll, ~3s]:
-Quick-cut course energy. Show: gallery in the stands cheering, fans walking the fairway ropes, a player draining a putt on the green, a wide shot of the signature hole. Mix drone, eye-level, and low angles. Natural sunlight and shadows. The feel of a live tournament, not stock imagery.
-
-Scene 4 [Outro, ~2s]:
-Clean motion graphic. Golfers Unite logo or wordmark. Tournament name and week. Optional call-to-action text. Dark navy or golf green background. Minimal, editorial.
-
-Cinematography:
-- Camera angles: Mix aerial/drone, standard eye-level, low angle (from putting green level), gallery POV
-- Lighting: Natural sunlight, dappled shadows through tree-lined fairways, warm golden light on course
-- Locations: Fairway, putting greens, driving range, grandstands/gallery, clubhouse exterior or interior
-- Transitions: Clean cuts and gentle dissolves — no flashy wipes or heavy motion
-- Energy: Editorial and authentic — this is insider content, not a broadcast promo
-
-Visual style: Clean, minimal portrait video. Modern golf aesthetic — editorial, premium but inclusive.
-- Colors: Use #1E3A5F (dark navy) as primary, #2D5A27 (golf green) as accent, #F5F5F0 as background.
-- Avatar: Clearly visible, centered, well-lit. No distracting overlays on the speaker.
-- Motion graphics: Subtle lower thirds or text overlays welcome if clean and purposeful.
-- Stock footage: Use venue-specific stock footage for B-roll when available. Real course footage preferred over generic graphics.
-- Tone: Insider, editorial — not a press release. Feels like a message from a trusted golf community member.
+[SCRIPT] Drone open, Jeff course-side, gallery B-roll, navy outro.
 ```
+
+Build: Replace `[SCRIPT]` with the tightened approved script. Drop contractions and trim filler to fit. The script names the tournament and venue — Video Agent infers course visuals from that context. The suffix encodes the 4-scene structure: aerial drone B-roll open → Jeff course-side portrait in natural light → gallery energy cuts (drone + eye-level + low angle) → Golfers Unite dark navy outro card.
+
+### Fast-Path (V2) Motion Prompt
+
+```
+Warm, direct. Slight forward lean. Natural hand gesture mid-script. Confident close.
+```
+
+Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass the approved script verbatim as `--script`; do not include the cinematic suffix.
 
 ---
 
 ## Bob Commentator
 
 **Avatar ID:** `924e085127e14867814dc5f99d2f6419`
+**Avatar Type:** `talking_photo`
+**Voice ID (fast-path):** `06c816b952f14fa9b3a6c42aa151f731` (William Prescott - Broadcaster — authoritative, dignified)
 **Role:** Senior Tour announcer, five decades on the mic
 
 ### Tone & Style
@@ -123,50 +128,28 @@ Visual style: Clean, minimal portrait video. Modern golf aesthetic — editorial
 - **Voice:** Determined automatically by HeyGen from avatar — do NOT pass `voice_id`.
 
 ### Video Agent Prompt
+
 ```
-Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
-
-Avatar (REQUIRED): Use ONLY custom avatar ID 924e085127e14867814dc5f99d2f6419. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
-
-Script (deliver this spoken content exactly):
-"[INSERT APPROVED SCRIPT HERE]"
-
-Tournament venue:
-[INSERT TOURNAMENT VENUE CONTEXT HERE]
-Let the venue inform the weight and grandeur of the visuals. This is a historic place — treat it that way.
-
-Scene 1 [B-roll, no VO, ~3s]:
-Sweeping, reverent venue open. Wide aerial drone shot of the full course — slow, deliberate, like the camera is paying its respects. Cut to an elevated wide shot of the gallery ringing the 18th or most iconic hole. Golden light, long shadows, quiet dignity. No avatar, no text.
-
-Scene 2 [A-roll, ~14s]:
-Bob delivers the full script. Position him in an elevated, broadcast-style setting — a press box view overlooking the course, or a dignified indoor setting (dark paneling, broadcast booth aesthetic) with the venue visible through a wide window or in background. Classic broadcast lighting. Authoritative, centered framing. Let the gravitas breathe.
-
-Scene 3 [B-roll, ~3s]:
-Historic course beauty and crowd. Show: wide panoramic of the fairways, gallery quietly watching from the ropes, a classic putting green moment, the clubhouse facade. Dignified cuts — no fast-paced energy. This is the Tour's cathedral, not an entertainment venue.
-
-Scene 4 [Outro, ~2s]:
-Dignified title card. Dark mahogany or navy. Tournament name, year. Golfers Unite mark. Minimal — no animation. Classic.
-
-Cinematography:
-- Camera angles: Elevated broadcast angles, wide fairway panoramics, gallery-side eye-level, slow aerial drone
-- Lighting: Classic broadcast — warm, controlled, dignified. Natural light on course shots, golden hour preferred.
-- Locations: Fairway panoramics, 18th hole, press box or elevated broadcast position, gallery ropes, clubhouse
-- Transitions: Slow, deliberate dissolves — nothing rushed. The weight of history deserves patience.
-- Energy: Reverent and authoritative. Five decades of watching greatness unfold.
-
-Visual style: Classic broadcast aesthetic. Dignified, timeless — the visual weight should match the voice.
-- Colors: Use #2C1810 (dark mahogany) as primary, #1C1C2E (deep navy) as background, #C9A84C (broadcast gold) as accent.
-- Avatar: Centered, well-lit with classic broadcast lighting. Authoritative framing — no casual composition.
-- Motion graphics: Minimal — only subtle lower thirds if needed. No flashy animations. Gravitas over spectacle.
-- Stock footage: Prefer sweeping, elegant course footage. Historic venue wide shots over close-up action.
-- Tone: The voice of golf history. Every word carries weight.
+[SCRIPT] Aerial open, Bob broadcast elevated, reverent gallery, dark outro.
 ```
+
+Build: Replace `[SCRIPT]` with the tightened approved script. Bob speaks deliberately — every word earns its place, so trim without softening. The suffix encodes the 4-scene structure: slow aerial drone B-roll open → Bob at elevated broadcast position with dignified framing → reverent gallery wide shots and fairway panoramics → dark mahogany/navy outro card. No flashy transitions — slow dissolves only.
+
+### Fast-Path (V2) Motion Prompt
+
+```
+Grave and measured. Slow, deliberate head nod. Eyes focused at camera. Still, commanding.
+```
+
+Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass the approved script verbatim as `--script`.
 
 ---
 
 ## Bud The Caddy
 
 **Avatar ID:** `35a38a2bfbfe4d5ea33f1a8b8434aa06`
+**Avatar Type:** `talking_photo`
+**Voice ID (fast-path):** `f38a635bee7a4d1f9b0a654a31d050d2` (Chill Brian — casual, laid-back)
 **Role:** Career looper — Nantucket summers, Palm Beach winters, zero tax returns
 
 ### Backstory
@@ -201,50 +184,28 @@ Bud has been on the bag for thirty years, working private clubs up and down the 
 - **Voice:** Determined automatically by HeyGen from avatar — do NOT pass `voice_id`.
 
 ### Video Agent Prompt
+
 ```
-Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
-
-Avatar (REQUIRED): Use ONLY custom avatar ID 35a38a2bfbfe4d5ea33f1a8b8434aa06. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
-
-Script (deliver this spoken content exactly):
-"[INSERT APPROVED SCRIPT HERE]"
-
-Tournament venue:
-[INSERT TOURNAMENT VENUE CONTEXT HERE]
-Bud has walked this course. Show the ground-level, lived-in, working version of it — not the postcard. This is the caddy's-eye view.
-
-Scene 1 [B-roll, no VO, ~3s]:
-Ground-level course opening. Low-angle shot from the fairway — looking up toward the green, bag visible at the edge of frame. Cut to a rope-line shot: gallery watching, a player setting up a shot, caddies conferring. Natural light, worn turf, real course feel. Not glamorous. Honest.
-
-Scene 2 [A-roll, ~14s]:
-Bud delivers the full script. He's on-course — on the bag loop or near the practice green. Casual framing, natural outdoor light, turf or fairway behind him. He looks like he just walked off the 9th. No studio, no polish. Relaxed but purposeful — this is a man in his element.
-
-Scene 3 [B-roll, ~3s]:
-Caddy's-eye view of the tournament. Quick cuts: a player working through a tough lie, a caddy checking yardage, the gallery crowding the ropes on a par-3, a wide shot of the driving range at dawn — players warming up, bags lined up, the quiet before the chaos.
-
-Scene 4 [Outro, ~2s]:
-Low-key outro. Light motion graphic — Golfers Unite mark, tournament info, maybe a cheeky one-liner overlay. Warm, earthy palette. Nothing too slick.
-
-Cinematography:
-- Camera angles: Ground-level low angles, fairway-walker POV, caddy's-eye perspective, rope-line shots
-- Lighting: Natural outdoor light — no studio, no perfection. Dappled shadows, warm morning sun on the turf.
-- Locations: Fairway, practice green, yardage markers, driving range, ropes-side gallery
-- Transitions: Natural cuts — like the camera is walking the course. Nothing too polished.
-- Energy: Casual insider. This guy has seen it all and has no reason to perform.
-
-Visual style: Casual, outdoorsy. The vibe of a man who's been outside his whole life.
-- Colors: Use #4A7C59 (fairway green) as primary, #8B6914 (earth/sand) as accent, #E8D5B7 (warm natural) as background.
-- Avatar: Natural, relaxed framing. No polish — this guy lives outside.
-- Motion graphics: Light touch only. No corporate overlays. Real course footage heavily preferred over graphics.
-- Stock footage: Caddy routines, fairway walks, rope-line moments — authentic over aesthetic.
-- Tone: Irreverent insider. Funny without trying too hard. He'd never admit he loves this job.
+[SCRIPT] Low fairway open, Bud on-course casual, caddy B-roll, earthy outro.
 ```
+
+Build: Replace `[SCRIPT]` with the tightened approved script. Keep the best joke or insider line — that's the whole video. The suffix encodes the 4-scene structure: ground-level low-angle fairway B-roll open (bag at frame edge, rope-line energy) → Bud casual on-course in natural outdoor light → caddy's-eye B-roll cuts (yardage checks, player tough lies, dawn range warmup) → warm earthy palette Golfers Unite outro.
+
+### Fast-Path (V2) Motion Prompt
+
+```
+Casual, loose. Slight smirk. One knowing shrug mid-script. Relaxed close.
+```
+
+Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass the approved script verbatim as `--script`.
 
 ---
 
 ## Pro Golfer
 
 **Avatar ID:** `1fd5fe07a84749fc88143d0640841d46`
+**Avatar Type:** `talking_photo`
+**Voice ID (fast-path):** `0f50a7a5577e4cd583ba738094956899` (Marcus - Professional — direct, focused)
 **Role:** Rookie Tour pro — just earned his card this season
 
 ### Backstory
@@ -279,50 +240,28 @@ He's been grinding for this his entire life. Mini-tours, Q-School, Korn Ferry �
 - **Voice:** Determined automatically by HeyGen from avatar — do NOT pass `voice_id`.
 
 ### Video Agent Prompt
+
 ```
-Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
-
-Avatar (REQUIRED): Use ONLY custom avatar ID 1fd5fe07a84749fc88143d0640841d46. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
-
-Script (deliver this spoken content exactly):
-"[INSERT APPROVED SCRIPT HERE]"
-
-Tournament venue:
-[INSERT TOURNAMENT VENUE CONTEXT HERE]
-Show the course as a challenge — the terrain, the conditions, the demands. This pro has done his homework on this venue.
-
-Scene 1 [B-roll, no VO, ~3s]:
-Athletic course open. Pre-dawn or early morning at the practice range — players warming up, irons on the range, bags lined up. Cut to a sharp low-angle shot of a player approaching a tight pin position. The course is already working. Focused energy from the first frame.
-
-Scene 2 [A-roll, ~14s]:
-The pro delivers the full script. He's on the practice tee or on-course — athletic, forward-facing, no softening. Tight portrait framing. The driving range or course is clearly visible behind him. He looks like he's between shots on a tournament day. Sharp, clean lighting — he takes everything seriously, including how he looks on camera.
-
-Scene 3 [B-roll, ~3s]:
-Tournament field in preparation. Quick cuts: players hitting approach shots, reading greens with caddies, a tight flag stick on a difficult hole, a low-angle shot of a ball tracking toward the pin. Ground-level and drone angles mixed. The work, the craft, the competition.
-
-Scene 4 [Outro, ~2s]:
-Clean, stark motion graphic. Black or deep navy. White text. Tournament name. Golfers Unite mark. No noise. This pro doesn't waste motion.
-
-Cinematography:
-- Camera angles: Low ground-level (from green looking up), forward-facing athletic eye-level, short drone, tight range shots
-- Lighting: Sharp, clean. Natural morning light on the range. High-contrast and focused — no soft golden haze here.
-- Locations: Driving range, practice green, approach zones, on-course holes, caddies at work
-- Transitions: Tight, efficient cuts. Nothing lingers. He doesn't waste time on the course or in the edit.
-- Energy: Focused. Serious. The work speaks.
-
-Visual style: Modern, athletic. Practice facility or on-course. Clean, sharp energy.
-- Colors: Use #0D0D0D (black) as primary, #F0F0F0 (clean white) as background, #2563EB (athletic blue) as accent.
-- Avatar: Forward-facing, intense. Athlete framing — no softening, no casual composition.
-- Motion graphics: Minimal and purposeful only. This isn't a hype video — it's a statement.
-- Stock footage: Athletic performance footage — approach shots, putting, driving range work. Real competition, not scenery.
-- Tone: Focused, serious. Every shot matters. The work speaks.
+[SCRIPT] Range open, Pro practice tee portrait, approach shots, stark outro.
 ```
+
+Build: Replace `[SCRIPT]` with the tightened approved script. No filler — every word should sound like it cost something. The suffix encodes the 4-scene structure: pre-dawn practice range B-roll open (irons on the range, low-angle pin approach) → Pro on practice tee, forward-facing portrait with sharp clean lighting → approach shots/green-reading/ball-tracking cuts (ground-level and drone mixed) → stark black/deep navy Golfers Unite outro card.
+
+### Fast-Path (V2) Motion Prompt
+
+```
+Focused, intense. Direct eye contact throughout. Minimal movement. Determined close.
+```
+
+Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass the approved script verbatim as `--script`.
 
 ---
 
 ## Golf Cart Girl
 
 **Avatar ID:** `fee86c5c0bbe45f7954d2bd31046b6f9`
+**Avatar Type:** `talking_photo`
+**Voice ID (fast-path):** `084760b4922a44599575c770070ec2d7` (Peppy Stella — playful, bright)
 **Role:** The beverage cart girl — the soul of the round
 
 ### Backstory
@@ -357,41 +296,17 @@ She runs the cart, she knows everyone's drink order, and she will absolutely roa
 - **Voice:** Determined automatically by HeyGen from avatar — do NOT pass `voice_id`.
 
 ### Video Agent Prompt
+
 ```
-Golfers Unite golf content video. Portrait orientation (9:16) for Instagram Reels and social media. Duration: ~20 seconds — follow the script closely.
-
-Avatar (REQUIRED): Use ONLY custom avatar ID fee86c5c0bbe45f7954d2bd31046b6f9. Do NOT generate a new avatar or substitute a stock avatar. This is a pre-built custom avatar that must appear in all A-roll scenes exactly as-is.
-
-Script (deliver this spoken content exactly):
-"[INSERT APPROVED SCRIPT HERE]"
-
-Tournament venue:
-[INSERT TOURNAMENT VENUE CONTEXT HERE]
-Show the sunny, fun version of this venue — the side most fans are actually experiencing. Gallery walks, cart paths, warm days on course. The party is happening.
-
-Scene 1 [B-roll, no VO, ~3s]:
-Bright, warm course opening. Wide sunny shot of the gallery walking the fairways — fans in hats and sunglasses, smiling. Cut to a cart path at the tournament — the vibe of a great day outside. Blue sky, warm light, zero stress. The round is already good.
-
-Scene 2 [A-roll, ~14s]:
-She delivers the full script. She's on-course — cart path or near the beverage area, sunny backdrop behind her. Casual portrait framing, completely relaxed. She's smirking because she knows something you don't. Light, warm, natural. Beverages visible in the background if possible.
-
-Scene 3 [B-roll, ~3s]:
-Tournament from the fan's perspective. Quick cuts: fans clinking beers in the stands, gallery reaction to a birdie putt, a wide shot of the 18th hole with a packed crowd, a sunny fairway walk. Energy is fun, light, social — the best kind of golf.
-
-Scene 4 [Outro, ~2s]:
-Bright, punchy title card. Sunny palette — gold, coral, sky blue. Tournament name and a light Golfers Unite tag. Optional punchline text overlay. Breezy.
-
-Cinematography:
-- Camera angles: Wide sunny course shots, fan-level gallery angles, eye-level cart path, crowd reactions
-- Lighting: Bright midday sun, warm golden light, blue sky backdrop — the best weather day of the week
-- Locations: Cart path, gallery walks, grandstands, par-3 spectator areas, fan zones, fairway ropes
-- Transitions: Quick, light cuts — punchy but not chaotic. Energy matches the smirk.
-- Energy: Sunny, social, fun. This is the tournament fans are actually at.
-
-Visual style: Bright, sunny, on-course. Warm and inviting — feels like you just flagged down the cart.
-- Colors: Use #FFD700 (golden/sunny) as primary, #FF7043 (warm coral) as accent, #87CEEB (sky blue) as background.
-- Avatar: Casual, relaxed — smirking energy. Not stiff or formal. She's at work but having the best day.
-- Motion graphics: Fun, light. Quick text overlays for punchlines welcome. Keep it breezy and readable.
-- Stock footage: Sunny course scenes, fans enjoying the round, gallery reactions, wide fairway shots. Happy vibes only.
-- Tone: The round's going fine because the drinks are cold.
+[SCRIPT] Sunny gallery open, Cart Girl cart-path portrait, fans B-roll, gold outro.
 ```
+
+Build: Replace `[SCRIPT]` with the tightened approved script. Keep the punchline — it's the whole video. The suffix encodes the 4-scene structure: wide sunny gallery walking B-roll open (fans in hats, blue sky, cart path energy) → Cart Girl on cart-path with smirking casual portrait framing, beverages in background → fan reaction/crowd B-roll cuts (birdie reactions, packed 18th, fairway walks) → bright punchy gold/coral Golfers Unite outro card.
+
+### Fast-Path (V2) Motion Prompt
+
+```
+Light, playful smirk throughout. One quick eyebrow raise. Breezy, confident close.
+```
+
+Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass the approved script verbatim as `--script`.

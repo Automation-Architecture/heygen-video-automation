@@ -14,9 +14,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 
-HEYGEN_API_KEY = os.environ.get("HEYGEN_API_KEY")
 POLL_INTERVAL = 15   # seconds between checks
-MAX_WAIT = 600       # 10 minutes max
+MAX_WAIT = 1800      # 30 minutes max (queue can be slow; confirmed videos render 12–30 min after submission)
 
 
 def log(msg):
@@ -24,46 +23,46 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def heygen_get(path):
+def heygen_get(path, api_key):
     req = urllib.request.Request(
         f"https://api.heygen.com{path}",
-        headers={"X-Api-Key": HEYGEN_API_KEY}
+        headers={"X-Api-Key": api_key}
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return None  # Video Agent videos take ~4 min to become queryable
+            return None  # Video Agent videos may 404 for 12–30 min while queued
         body = e.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HeyGen API error {e.code}: {body}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"Network error reaching HeyGen: {e.reason}") from e
 
 
-def get_latest_video_id():
+def get_latest_video_id(api_key):
     log("# No video_id provided — fetching most recent video from account.")
     log("# Note: if the video was just submitted, it may not appear yet. Wait a few seconds and retry if needed.")
-    data = heygen_get("/v1/video.list?limit=1")
+    data = heygen_get("/v1/video.list?limit=1", api_key)
     videos = data.get("data", {}).get("videos", [])
     if not videos:
         raise RuntimeError("No videos found in HeyGen account")
     return videos[0]["video_id"]
 
 
-def poll_video(video_id):
+def poll_video(video_id, api_key):
     log(f"Polling HeyGen for video: {video_id}")
     deadline = time.time() + MAX_WAIT
 
     while time.time() < deadline:
         try:
-            data = heygen_get(f"/v1/video_status.get?video_id={video_id}")
+            data = heygen_get(f"/v1/video_status.get?video_id={video_id}", api_key)
         except RuntimeError as e:
             print(json.dumps({"status": "failed", "video_id": video_id, "error": str(e)}))
             sys.exit(1)
 
         if data is None:
-            log(f"  [{datetime.now().strftime('%H:%M:%S')}] status: indexing (404 — normal for Video Agent, retrying...)")
+            log(f"  [{datetime.now().strftime('%H:%M:%S')}] status: indexing (404 — normal for Video Agent; V2 videos should not 404, retrying...)")
             time.sleep(POLL_INTERVAL)
             continue
 
@@ -94,13 +93,14 @@ def poll_video(video_id):
 
 
 if __name__ == "__main__":
+    HEYGEN_API_KEY = os.environ.get("HEYGEN_API_KEY")
     if not HEYGEN_API_KEY:
         print("Error: HEYGEN_API_KEY not set", file=sys.stderr)
         sys.exit(1)
 
     try:
-        video_id = sys.argv[1] if len(sys.argv) > 1 else get_latest_video_id()
-        poll_video(video_id)
+        video_id = sys.argv[1] if len(sys.argv) > 1 else get_latest_video_id(HEYGEN_API_KEY)
+        poll_video(video_id, HEYGEN_API_KEY)
     except RuntimeError as e:
         print(json.dumps({"status": "failed", "error": str(e)}))
         sys.exit(1)

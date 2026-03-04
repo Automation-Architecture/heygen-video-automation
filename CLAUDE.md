@@ -7,7 +7,13 @@ HeyGen avatar video generation triggered directly from Claude Code.
 
 **To create a video:** use `/create-video [optional topic]`, or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
 
-**Avatar personas and prompt templates:** `directives/avatar_personas.md` defines each avatar's character, tone guide, and a ready-to-use `### Video Agent Prompt` template with full cinematic production direction — 4-scene structure (venue B-roll open, avatar A-roll, course action B-roll, branded outro), camera angle guidance (drone, low, eye-level, gallery POV), lighting direction (natural sunlight, dappled shadows), and persona-specific location flavoring. Orchestration consists of finding the selected avatar's template and making two substitutions: `[INSERT APPROVED SCRIPT HERE]` with the approved script, and `[INSERT TOURNAMENT VENUE CONTEXT HERE]` with the venue visual context from tournament research. No manual prompt engineering needed.
+**Two render paths** (Step 2 in the directive asks the user to choose):
+- **Fast path** (~1 min): `execution/generate_heygen_video_v2.py` — V2 endpoint + Avatar IV engine. Single talking-head scene with photorealistic motion. Requires `voice_id` per avatar (defined in `directives/avatar_personas.md`).
+- **Cinematic path** (12–30 min): `execution/generate_heygen_video.py` — Video Agent endpoint. Multi-scene production with drone open, avatar A-roll, gallery B-roll, branded outro. Voice is auto-selected from the avatar.
+
+**Avatar personas and prompt templates:** `directives/avatar_personas.md` defines each avatar's character, tone guide, `voice_id` (fast path), `### Fast-Path (V2) Motion Prompt`, and `### Video Agent Prompt` (cinematic path, ≤ 245 chars total with cinematic suffix).
+
+**⚠ Video Agent is slow when queued:** Video Agent jobs take 12–30 minutes when HeyGen's queue is busy. A persistent 404 from the status endpoint does NOT mean the job failed — it means it's still queued. The poll script waits up to 30 minutes. If it times out, check the video list (`/v1/video.list`) or HeyGen dashboard. V2 fast-path videos do NOT have a 404 window.
 
 **Avatar IDs (HeyGen):** All IDs verified. Re-validate only if avatars are modified in HeyGen (`execution/validate_avatar_id.py <id>`). Manage avatars at `app.heygen.com/avatar/my-avatars`.
 
