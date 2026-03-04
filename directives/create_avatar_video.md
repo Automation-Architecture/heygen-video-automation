@@ -47,8 +47,6 @@ HEYGEN_API_KEY=<key> python3 execution/validate_avatar_id.py <avatar_id>
 
 Use the confirmed `avatar_id` in Step 2.
 
-Each avatar has a pre-configured voice in HeyGen — no `voice_id` needed.
-
 ## Step 1: Draft the Script (if not provided)
 
 **Recommended path:** Follow `directives/create_script.md` as a sub-directive. It handles
@@ -106,7 +104,7 @@ On success, prints `{ "video_id": "<id>" }`. Pass to Step 3.
 
 ### Cinematic Path: Video Agent
 
-**⚠ Hard limit: 245 chars total.** Video Agent silently rejects longer prompts — it returns a `video_id` but the video never renders (persistent 404). Count characters before submitting.
+**Note on prompt length:** 245 chars is a known-safe conservative target, not a confirmed hard limit. Prompts up to ~1472 chars have rendered successfully. The true ceiling is unknown — see `directives/avatar_personas.md` for current testing status. When in doubt, keep the total prompt compact and follow the length guidance there.
 
 Each avatar has a compact `### Video Agent Prompt` template in `directives/avatar_personas.md`. The template is structured as:
 
@@ -118,7 +116,7 @@ Where the cinematic suffix (~55–65 chars) encodes the 4-scene structure (B-rol
 
 1. Take the approved script and tighten it to fit within the avatar's script budget (total - suffix length). Drop contractions, trim filler, preserve all key facts and the persona's voice.
 2. Append the avatar's cinematic suffix verbatim.
-3. Count total characters. Must be ≤ 245.
+3. Count total characters. Aim to stay within the current confirmed-safe range (see `directives/avatar_personas.md`).
 
 ```bash
 HEYGEN_API_KEY=<key> python3 execution/generate_heygen_video.py \

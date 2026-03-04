@@ -85,7 +85,7 @@ docs/
 | Output | Single-scene talking head | Multi-scene: drone open → avatar → B-roll → branded outro |
 | Avatar motion | Photorealistic (Avatar IV) | Basic lip-sync (talking photos) |
 | Voice | Explicit `voice_id` per avatar | Auto from avatar |
-| Prompt | Script text only | Script + cinematic suffix (≤ 245 chars total) |
+| Prompt | Script text only | Script + cinematic suffix (245 chars is a conservative target; longer prompts up to ~1500 chars have worked in testing) |
 
 Both paths use the same `execution/poll_heygen_video.py` for status polling.
 

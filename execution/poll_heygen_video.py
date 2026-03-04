@@ -44,6 +44,8 @@ def get_latest_video_id(api_key):
     log("# No video_id provided — fetching most recent video from account.")
     log("# Note: if the video was just submitted, it may not appear yet. Wait a few seconds and retry if needed.")
     data = heygen_get("/v1/video.list?limit=1", api_key)
+    if data is None:
+        raise RuntimeError("Failed to fetch video list (unexpected 404 from /v1/video.list)")
     videos = data.get("data", {}).get("videos", [])
     if not videos:
         raise RuntimeError("No videos found in HeyGen account")
