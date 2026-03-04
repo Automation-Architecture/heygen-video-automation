@@ -95,7 +95,7 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 ## Bob Commentator
 
 **Avatar ID (Look):** `7c5124f727b840bdb2fa66380ade0a0f` ← use this for video generation
-**Group ID:** `924e085127e14867814dc5f99d2f6419` (Photo Avatar Group — management only)
+**Group ID:** `<INSERT_BOB_GROUP_ID_FROM_create_photo_avatar_group.py>` (Photo Avatar Group — management only; must be the group_id returned by the group-create call for Bob's photo avatar)
 **Other Look IDs:** `4bfacbefb81843a68a6ffb2d0fca1f38`, `3776b2391b9f440a8e820e20a8ae5fe4`
 **Avatar Type:** `talking_photo`
 **Voice ID (fast-path):** `06c816b952f14fa9b3a6c42aa151f731` (William Prescott - Broadcaster — authoritative, dignified)
@@ -229,7 +229,7 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 ## Pro Golfer
 
 **Avatar ID (Look):** `3c4b06f3ae6b42adb456f7022f4dc9d1` ← use this for video generation
-**Group ID:** `3c4b06f3ae6b42adb456f7022f4dc9d1` (Photo Avatar Group — management only)
+**Group ID:** `<INSERT_PRO_GOLFER_GROUP_ID_FROM_create_photo_avatar_group.py>` (Photo Avatar Group — management only; use the actual `group_id` returned by the script)
 **Avatar Type:** `talking_photo`
 **Voice ID (fast-path):** `0f50a7a5577e4cd583ba738094956899` (Marcus - Professional — direct, focused)
 **Role:** Rookie Tour pro — just earned his card this season
@@ -288,8 +288,8 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 ## Golf Cart Girl
 
 **Avatar ID (Look):** `5de5fb82755e4ea198450101ae360c79` ← use this for video generation
-**Group ID:** `fee86c5c0bbe45f7954d2bd31046b6f9` (Photo Avatar Group — management only)
-**Other Look IDs:** `0a82d07f691a4ecfb0996ddee280037a`, `fee86c5c0bbe45f7954d2bd31046b6f9`
+**Group ID:** `<INSERT_GOLF_CART_GIRL_GROUP_ID_FROM_create_photo_avatar_group.py>` (Photo Avatar Group — management only; use the actual `group_id` returned by the script)
+**Other Look IDs:** `0a82d07f691a4ecfb0996ddee280037a`
 **Avatar Type:** `talking_photo`
 **Voice ID (fast-path):** `084760b4922a44599575c770070ec2d7` (Peppy Stella — playful, bright)
 **Role:** The beverage cart girl — the soul of the round

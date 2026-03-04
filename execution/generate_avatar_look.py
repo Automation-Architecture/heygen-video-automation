@@ -43,7 +43,7 @@ def generate_look(
     api_key: str,
 ) -> str:
     """Generate a look from a trained avatar group. Costs $1."""
-    if "Avatar" not in prompt and "avatar" not in prompt:
+    if "avatar" not in prompt.casefold():
         raise ValueError(
             "Prompt must include the word 'Avatar' (HeyGen API requirement). "
             "Add 'Avatar' anywhere in the prompt text."
