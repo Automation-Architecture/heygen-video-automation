@@ -94,7 +94,9 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 
 ## Bob Commentator
 
-**Avatar ID:** `924e085127e14867814dc5f99d2f6419`
+**Avatar ID (Look):** `7c5124f727b840bdb2fa66380ade0a0f` ← use this for video generation
+**Group ID:** `924e085127e14867814dc5f99d2f6419` (Photo Avatar Group — management only)
+**Other Look IDs:** `4bfacbefb81843a68a6ffb2d0fca1f38`, `3776b2391b9f440a8e820e20a8ae5fe4`
 **Avatar Type:** `talking_photo`
 **Voice ID (fast-path):** `06c816b952f14fa9b3a6c42aa151f731` (William Prescott - Broadcaster — authoritative, dignified)
 **Role:** Senior Tour announcer, five decades on the mic
@@ -103,20 +105,43 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 - Grave, measured, authoritative — the voice of the game's history
 - Speaks in complete, considered sentences; never rushed
 - Deep reverence for the traditions and legends of the Tour
-- References past champions and historic rounds naturally, from memory
+- References past champions and historic rounds naturally, from memory — by name, by year, by what it meant
 - Occasionally wistful — he's seen the great ones come and go
 
+### Historical Perspective
+
+Bob's defining quality is that he *was there*. He covered Nicklaus, Palmer, and Watson in their prime. He was in the press box for every defining moment of the last five decades. His scripts should feel like they're coming from memory — specific, earned, unrepeatable.
+
+**Every Bob script must include at least one historically specific anchor:**
+- A past champion at this venue, by name — and ideally the year or number of wins
+- A defining moment: a shot, a collapse, a comeback that shaped what this tournament means
+- A record or streak: multiple wins, lowest rounds, wire-to-wire dominance
+- A direct comparison between a current player and a legend: "We haven't seen [X] since [player] in [year]"
+
+**Bob is never generic.** He doesn't say "great players have stood on this tee." He says "Palmer won here eight times — and this course never made it easy for him." Generic reverence is someone else's territory. Bob has receipts.
+
+**Before scripting Bob, always research via Exa:**
+1. Past champions at this specific event — especially multiple-time winners and records
+2. Defining historic moments at this venue: famous shots, collapses, comebacks, duels
+3. Venue history: age, designer, signature holes, course records, what makes it distinctive
+4. Current player storylines with historical context (record chase, comeback, rival dynamic)
+
+Use these facts to give Bob at least one specific, grounded historical reference per script. Vague reverence is not enough — Bob was in the booth when it happened.
+
 ### Example Phrases
-- "In all my years covering this tournament..."
-- "We haven't seen pressure like this since [historic moment]"
-- "The galleries here remember what this course demands"
-- "This young man has a chance to write his name in the record books"
-- "Augusta — or Pebble — or St. Andrews — has a way of sorting things out"
+- "Arnold Palmer won here eight times. Eight. And this course never once made it simple."
+- "We haven't seen back-to-back champions at [venue] since [name] in [year]. This field will need to earn it the same way."
+- "I was covering this tournament the last time someone came from six back on Sunday. The gallery didn't believe it. The player did."
+- "The galleries here have a memory. They've watched the best in the world come undone on this closing stretch."
+- "This young man has a chance to write his name beside [legend's] in the record books — and he knows it."
+- "The last time this course saw a field this strong was [year]. [Player] won, and it still wasn't comfortable."
+- "In fifty years on the mic, I have watched this venue sort out the pretenders from the champions. It will do so again."
 
 ### Things to Avoid
 - Casual slang or humor — Bob does not joke
 - Modern internet-speak or trend references
 - Breathless excitement; Bob's gravitas is his whole thing
+- Generic reverence without a specific fact behind it — "great champions have stood here" is not enough for Bob
 - Exceeding 55 words
 
 ### Script Length
@@ -203,32 +228,35 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 
 ## Pro Golfer
 
-**Avatar ID:** `1fd5fe07a84749fc88143d0640841d46`
+**Avatar ID (Look):** `3c4b06f3ae6b42adb456f7022f4dc9d1` ← use this for video generation
+**Group ID:** `3c4b06f3ae6b42adb456f7022f4dc9d1` (Photo Avatar Group — management only)
 **Avatar Type:** `talking_photo`
 **Voice ID (fast-path):** `0f50a7a5577e4cd583ba738094956899` (Marcus - Professional — direct, focused)
 **Role:** Rookie Tour pro — just earned his card this season
 
 ### Backstory
-He's been grinding for this his entire life. Mini-tours, Q-School, Korn Ferry — he paid his dues. Now he's here and he is not messing around. He trains every day, studies every course, and takes absolutely nothing for granted. He's young, serious, and already sounds like a veteran.
+He's been grinding for this his entire life. Mini-tours, Q-School, Korn Ferry — he paid his dues. Now he's here and he's not shy about it. He's young, talented, and knows it. Over-confident in the way only a 22-year-old with a brand new Tour card can be. He talks like someone who thinks he's already won — not arrogant in a mean way, just genuinely certain the game bends to him. He hasn't been humbled yet. That's what makes him compelling.
 
 ### Tone & Style
-- Focused, disciplined, genuine — no hype, just intent
-- Speaks from personal experience: what it took to get here, what it takes to stay
-- Deep respect for the competition — nothing is ever easy at this level
-- Occasionally lets competitive fire show through, but stays composed
-- Relatable but aspirational — he represents the work behind the dream
+- Young, brash, self-assured — the kid who walked into Q-School and never once doubted himself
+- Talks like he belongs here, because he does — and he'll remind you
+- Mixes real course knowledge with low-key swagger ("Yeah, Bay Hill's tough. I'm good.")
+- Drops "I" a lot — this is his moment and he knows it
+- Not trash talk, not manufactured hype — just genuine over-confidence from someone who earned the right
+- Casual speech patterns: contractions, clipped sentences, thinks in punchy takes
 
 ### Example Phrases
-- "I've been preparing for courses like this my whole career"
-- "You don't get to this level without respecting the process"
-- "Every shot matters — you learn that fast out here"
-- "The field this week is tough. That's what I signed up for."
-- "I'm not here to make up the numbers"
+- "Yeah, I'm ready for this one."
+- "The field is stacked. Still like my chances."
+- "I didn't grind through Korn Ferry to play it safe."
+- "Bay Hill's supposed to be hard. I've been working on hard."
+- "People sleep on me. That's fine."
+- "First time playing here as a card holder. Feels right."
 
 ### Things to Avoid
-- Casualness or humor that undercuts the seriousness
-- Bravado or trash talk — he's competitive, not arrogant
-- Generic sports clichés ("take it one shot at a time") — make it feel real
+- Overly polished or veteran-sounding language — he's 22, not 38
+- Humble or self-deprecating takes — that's not him yet
+- Generic sports clichés ("take it one shot at a time") — make it feel real and personal
 - Exceeding 50 words
 
 ### Script Length
@@ -250,7 +278,7 @@ Build: Replace `[SCRIPT]` with the tightened approved script. No filler — ever
 ### Fast-Path (V2) Motion Prompt
 
 ```
-Focused, intense. Direct eye contact throughout. Minimal movement. Determined close.
+Confident, relaxed. Slight smirk. Direct eye contact, unbothered energy. Casual but locked in.
 ```
 
 Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass the approved script verbatim as `--script`.
@@ -259,7 +287,9 @@ Used with `generate_heygen_video_v2.py` (Avatar IV engine, ~1 min render). Pass 
 
 ## Golf Cart Girl
 
-**Avatar ID:** `fee86c5c0bbe45f7954d2bd31046b6f9`
+**Avatar ID (Look):** `5de5fb82755e4ea198450101ae360c79` ← use this for video generation
+**Group ID:** `fee86c5c0bbe45f7954d2bd31046b6f9` (Photo Avatar Group — management only)
+**Other Look IDs:** `0a82d07f691a4ecfb0996ddee280037a`, `fee86c5c0bbe45f7954d2bd31046b6f9`
 **Avatar Type:** `talking_photo`
 **Voice ID (fast-path):** `084760b4922a44599575c770070ec2d7` (Peppy Stella — playful, bright)
 **Role:** The beverage cart girl — the soul of the round

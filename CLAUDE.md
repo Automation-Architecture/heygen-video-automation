@@ -20,10 +20,10 @@ HeyGen avatar video generation triggered directly from Claude Code.
 | Avatar | ID | Type | Status |
 |--------|-----|------|----|
 | Jeff | `ccce0126b55f418e858ce9c7047eff1a` | standard avatar | ✓ verified |
-| Bob Commentator | `924e085127e14867814dc5f99d2f6419` | talking photo | ✓ verified |
+| Bob Commentator | `7c5124f727b840bdb2fa66380ade0a0f` | trained photo avatar (look) | ✓ verified |
 | Bud The Caddy | `35a38a2bfbfe4d5ea33f1a8b8434aa06` | talking photo | ✓ verified |
-| Pro Golfer | `1fd5fe07a84749fc88143d0640841d46` | talking photo | ✓ verified |
-| Golf Cart Girl | `fee86c5c0bbe45f7954d2bd31046b6f9` | talking photo | ✓ verified |
+| Pro Golfer | `3c4b06f3ae6b42adb456f7022f4dc9d1` | trained photo avatar (look) | ✓ verified |
+| Golf Cart Girl | `5de5fb82755e4ea198450101ae360c79` | trained photo avatar (look) | ✓ verified |
 
 ## The 3-Layer Architecture
 
