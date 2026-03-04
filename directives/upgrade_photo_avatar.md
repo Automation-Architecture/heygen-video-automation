@@ -222,9 +222,9 @@ You may need to create a new group with better photos (another $4).
 
 | Avatar | Group ID | Look ID | Trained | Date |
 |--------|----------|---------|---------|------|
-| Bob Commentator | `924e085127e14867814dc5f99d2f6419` | `7c5124f727b840bdb2fa66380ade0a0f` | Yes | 2026-03-04 |
+| Bob Commentator | `REPLACE_WITH_GROUP_ID_FROM_create_photo_avatar_group.py` | `7c5124f727b840bdb2fa66380ade0a0f` | Yes | 2026-03-04 |
 | Bud The Caddy | — | — | No | — |
-| Pro Golfer | `3c4b06f3ae6b42adb456f7022f4dc9d1` | `3c4b06f3ae6b42adb456f7022f4dc9d1` | Yes | 2026-03-04 |
-| Golf Cart Girl | `fee86c5c0bbe45f7954d2bd31046b6f9` | `5de5fb82755e4ea198450101ae360c79` | Yes | 2026-03-04 |
+| Pro Golfer | `REPLACE_WITH_GROUP_ID_FROM_create_photo_avatar_group.py` | `3c4b06f3ae6b42adb456f7022f4dc9d1` | Yes | 2026-03-04 |
+| Golf Cart Girl | `REPLACE_WITH_GROUP_ID_FROM_create_photo_avatar_group.py` | `5de5fb82755e4ea198450101ae360c79` | Yes | 2026-03-04 |
 
 *(Update this table after each successful upgrade)*

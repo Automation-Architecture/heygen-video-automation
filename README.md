@@ -17,10 +17,10 @@ You start a conversation in Claude Code, say what video you want (or just say "m
 | # | Avatar | Character | HeyGen ID |
 |---|--------|-----------|-----------|
 | 1 | **Jeff** | Golfers Unite founder — friendly, direct, like a friend at the clubhouse | `ccce0126b55f418e858ce9c7047eff1a` |
-| 2 | **Bob Commentator** | Senior Tour announcer — grave, authoritative, five decades on the mic | `924e085127e14867814dc5f99d2f6419` |
+| 2 | **Bob Commentator** | Senior Tour announcer — grave, authoritative, five decades on the mic | `7c5124f727b840bdb2fa66380ade0a0f` |
 | 3 | **Bud The Caddy** | Career looper — irreverent, funny, unfiltered | `35a38a2bfbfe4d5ea33f1a8b8434aa06` |
-| 4 | **Pro Golfer** | Rookie Tour pro — focused, disciplined, earned his card the hard way | `1fd5fe07a84749fc88143d0640841d46` |
-| 5 | **Golf Cart Girl** | Beverage cart — playful, punchy, always smirking | `fee86c5c0bbe45f7954d2bd31046b6f9` |
+| 4 | **Pro Golfer** | Rookie Tour pro — focused, disciplined, earned his card the hard way | `3c4b06f3ae6b42adb456f7022f4dc9d1` |
+| 5 | **Golf Cart Girl** | Beverage cart — playful, punchy, always smirking | `5de5fb82755e4ea198450101ae360c79` |
 
 Each avatar has both a cinematic prompt template (for Video Agent) and a voice ID + motion prompt (for the fast Avatar IV path), all defined in `directives/avatar_personas.md`.
 
