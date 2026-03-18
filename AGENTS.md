@@ -3,9 +3,9 @@
 You operate within a 3-layer architecture: directives (what to do), orchestration (you), execution (deterministic scripts).
 
 ## This Project
-HeyGen avatar video generation triggered directly from Claude Code or OpenAI Codex.
+HeyGen avatar video generation triggered directly from OpenAI Codex or Claude Code.
 
-**To create a video:** use `/create-video [optional topic]` (Claude Code) or `$create-video` (Codex), or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
+**To create a video:** use `$create-video [optional topic]`, or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
 
 **Two render paths** (Step 2 in the directive asks the user to choose):
 - **Fast path** (~1 min): `execution/generate_heygen_video_v2.py` — V2 endpoint + Avatar IV engine. Single talking-head scene with photorealistic motion. Requires `voice_id` per avatar (defined in `directives/avatar_personas.md`).
@@ -25,16 +25,25 @@ HeyGen avatar video generation triggered directly from Claude Code or OpenAI Cod
 | Pro Golfer | `3c4b06f3ae6b42adb456f7022f4dc9d1` | trained photo avatar (look) | ✓ verified |
 | Golf Cart Girl | `5de5fb82755e4ea198450101ae360c79` | trained photo avatar (look) | ✓ verified |
 
+## Environment
+
+**`HEYGEN_API_KEY`** must be set as an environment variable. All execution scripts read it via `os.environ.get("HEYGEN_API_KEY")`.
+
+- **Codex CLI:** Set in `.env` or export in shell
+- **Codex App (cloud):** Set in Codex Settings → Environments as an **environment variable** (not a secret — secrets are removed before the agent phase)
+
+All scripts use Python standard library only — no pip installs required.
+
 ## The 3-Layer Architecture
 
 **Layer 1 – Directives** (`directives/`)
-SOPs in Markdown. Define goals, inputs, tools, outputs, edge cases.
+SOPs in Markdown. Define goals, inputs, tools, outputs, edge cases. See `directives/README.md` for index.
 
 **Layer 2 – Orchestration (you)**
 Read directives, call execution tools in the right order, handle errors, update directives with learnings.
 
 **Layer 3 – Execution** (`execution/`)
-Deterministic Python scripts. Handle API calls, polling, file operations.
+Deterministic Python scripts. Handle API calls, polling, file operations. See `execution/README.md` for index.
 
 ## Operating Principles
 
@@ -43,27 +52,14 @@ Before writing a script, check `execution/` per your directive. Only create new 
 
 **2. Self-anneal when things break**
 - Read error message and stack trace
-- Fix the script and test it again (unless it uses paid tokens/credits/etc—in which case check with user first)
+- Fix the script and test it again (unless it uses paid tokens/credits/etc — in which case check with user first)
 - Update the directive with what you learned (API limits, timing, edge cases)
 
 **3. Update directives as you learn**
-Directives are living documents. When you discover API constraints, better approaches, common errors, or timing expectations—update the directive. Don't create or overwrite directives without asking unless explicitly told to.
+Directives are living documents. When you discover API constraints, better approaches, common errors, or timing expectations — update the directive. Don't create or overwrite directives without asking unless explicitly told to.
 
 **4. Keep README.md in sync**
 When user-facing behavior changes — new avatars, script flow changes, API endpoint updates, setup requirements — update `README.md` alongside the relevant directive. The README is the human-readable front door to this project and should always reflect how the system actually works.
-
-**5. Request Copilot review on every PR, then trigger auto-fix**
-After creating a pull request:
-```bash
-# 1. Request review
-gh pr edit <number> --add-reviewer Copilot
-
-# 2. Poll for Copilot's comment, then auto-post "@Copilot fix"
-python3 execution/poll_copilot_review.py \
-  --repo <owner/repo> \
-  --pr <number>
-```
-`poll_copilot_review.py` waits up to 30 minutes for Copilot to comment, then posts `@copilot open a new pull request to apply changes based on the comments in this thread` — this tells Copilot to open a separate fix PR rather than attempting an inline patch.
 
 ## Self-Annealing Loop
 
@@ -80,9 +76,7 @@ Errors are learning opportunities. When something breaks:
 - `execution/` — Python scripts (the tools). See `execution/README.md` for index.
 - `docs/` — API and platform reference documentation. See `docs/README.md` for index.
 - `logs/` — Application logs (gitignored). See `logs/README.md`.
-- `.claude/skills/` — Claude Code skills (`.claude/skills/create-video/SKILL.md`)
 - `.agents/skills/` — OpenAI Codex skills (`.agents/skills/create-video/SKILL.md`)
+- `.claude/skills/` — Claude Code skills (`.claude/skills/create-video/SKILL.md`)
 - `.tmp/` — Intermediate files, never committed, always regeneratable
 - `.env` — API keys and config
-- `.mcp.json` — Project-scoped MCP config (empty; defers to global config at `~/.claude/mcp.json`)
-
