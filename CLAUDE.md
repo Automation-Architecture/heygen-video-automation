@@ -3,9 +3,9 @@
 You operate within a 3-layer architecture: directives (what to do), orchestration (you), execution (deterministic scripts).
 
 ## This Project
-HeyGen avatar video generation triggered directly from Claude Code.
+HeyGen avatar video generation triggered directly from Claude Code or OpenAI Codex.
 
-**To create a video:** use `/create-video [optional topic]`, or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
+**To create a video:** use `/create-video [optional topic]` (Claude Code) or `$create-video` (Codex), or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
 
 **Two render paths** (Step 2 in the directive asks the user to choose):
 - **Fast path** (~1 min): `execution/generate_heygen_video_v2.py` — V2 endpoint + Avatar IV engine. Single talking-head scene with photorealistic motion. Requires `voice_id` per avatar (defined in `directives/avatar_personas.md`).
@@ -52,6 +52,19 @@ Directives are living documents. When you discover API constraints, better appro
 **4. Keep README.md in sync**
 When user-facing behavior changes — new avatars, script flow changes, API endpoint updates, setup requirements — update `README.md` alongside the relevant directive. The README is the human-readable front door to this project and should always reflect how the system actually works.
 
+**5. Request Copilot review on every PR, then trigger auto-fix**
+After creating a pull request:
+```bash
+# 1. Request review
+gh pr edit <number> --add-reviewer Copilot
+
+# 2. Poll for Copilot's comment, then auto-post "@Copilot fix"
+python3 execution/poll_copilot_review.py \
+  --repo <owner/repo> \
+  --pr <number>
+```
+`poll_copilot_review.py` waits up to 30 minutes for Copilot to comment, then posts `@copilot open a new pull request to apply changes based on the comments in this thread` — this tells Copilot to open a separate fix PR rather than attempting an inline patch.
+
 ## Self-Annealing Loop
 
 Errors are learning opportunities. When something breaks:
@@ -66,6 +79,8 @@ Errors are learning opportunities. When something breaks:
 - `directives/` — SOPs (the instruction set)
 - `execution/` — Python scripts (the tools)
 - `docs/` — API and platform reference documentation
+- `.claude/skills/` — Claude Code skills (`.claude/skills/create-video/SKILL.md`)
+- `.agents/skills/` — OpenAI Codex skills (`.agents/skills/create-video/SKILL.md`)
 - `.tmp/` — Intermediate files, never committed, always regeneratable
 - `.env` — API keys and config
 - `.mcp.json` — Project-scoped MCP config (empty; defers to global config at `~/.claude/mcp.json`)

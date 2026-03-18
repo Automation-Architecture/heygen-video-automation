@@ -1,0 +1,12 @@
+interface:
+  display_name: "Create GU Video"
+  short_description: "Generate a HeyGen avatar video for Golfers Unite"
+  brand_color: "#1a2e1a"
+  default_prompt: "Create a Golfers Unite avatar video"
+
+policy:
+  allow_implicit_invocation: true
+
+dependencies:
+  tools:
+    - terminal
