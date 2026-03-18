@@ -3,9 +3,9 @@
 You operate within a 3-layer architecture: directives (what to do), orchestration (you), execution (deterministic scripts).
 
 ## This Project
-HeyGen avatar video generation triggered directly from Claude Code.
+HeyGen avatar video generation triggered directly from Claude Code or OpenAI Codex.
 
-**To create a video:** use `/create-video [optional topic]`, or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
+**To create a video:** use `/create-video [optional topic]` (Claude Code) or `$create-video` (Codex), or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
 
 **Two render paths** (Step 2 in the directive asks the user to choose):
 - **Fast path** (~1 min): `execution/generate_heygen_video_v2.py` — V2 endpoint + Avatar IV engine. Single talking-head scene with photorealistic motion. Requires `voice_id` per avatar (defined in `directives/avatar_personas.md`).
@@ -20,10 +20,10 @@ HeyGen avatar video generation triggered directly from Claude Code.
 | Avatar | ID | Type | Status |
 |--------|-----|------|----|
 | Jeff | `ccce0126b55f418e858ce9c7047eff1a` | standard avatar | ✓ verified |
-| Bob Commentator | `924e085127e14867814dc5f99d2f6419` | talking photo | ✓ verified |
+| Bob Commentator | `7c5124f727b840bdb2fa66380ade0a0f` | trained photo avatar (look) | ✓ verified |
 | Bud The Caddy | `35a38a2bfbfe4d5ea33f1a8b8434aa06` | talking photo | ✓ verified |
-| Pro Golfer | `1fd5fe07a84749fc88143d0640841d46` | talking photo | ✓ verified |
-| Golf Cart Girl | `fee86c5c0bbe45f7954d2bd31046b6f9` | talking photo | ✓ verified |
+| Pro Golfer | `3c4b06f3ae6b42adb456f7022f4dc9d1` | trained photo avatar (look) | ✓ verified |
+| Golf Cart Girl | `5de5fb82755e4ea198450101ae360c79` | trained photo avatar (look) | ✓ verified |
 
 ## The 3-Layer Architecture
 
@@ -52,6 +52,19 @@ Directives are living documents. When you discover API constraints, better appro
 **4. Keep README.md in sync**
 When user-facing behavior changes — new avatars, script flow changes, API endpoint updates, setup requirements — update `README.md` alongside the relevant directive. The README is the human-readable front door to this project and should always reflect how the system actually works.
 
+**5. Request Copilot review on every PR, then trigger auto-fix**
+After creating a pull request:
+```bash
+# 1. Request review
+gh pr edit <number> --add-reviewer Copilot
+
+# 2. Poll for Copilot's comment, then auto-post "@Copilot fix"
+python3 execution/poll_copilot_review.py \
+  --repo <owner/repo> \
+  --pr <number>
+```
+`poll_copilot_review.py` waits up to 30 minutes for Copilot to comment, then posts `@copilot open a new pull request to apply changes based on the comments in this thread` — this tells Copilot to open a separate fix PR rather than attempting an inline patch.
+
 ## Self-Annealing Loop
 
 Errors are learning opportunities. When something breaks:
@@ -66,6 +79,8 @@ Errors are learning opportunities. When something breaks:
 - `directives/` — SOPs (the instruction set)
 - `execution/` — Python scripts (the tools)
 - `docs/` — API and platform reference documentation
+- `.claude/skills/` — Claude Code skills (`.claude/skills/create-video/SKILL.md`)
+- `.agents/skills/` — OpenAI Codex skills (`.agents/skills/create-video/SKILL.md`)
 - `.tmp/` — Intermediate files, never committed, always regeneratable
 - `.env` — API keys and config
 - `.mcp.json` — Project-scoped MCP config (empty; defers to global config at `~/.claude/mcp.json`)

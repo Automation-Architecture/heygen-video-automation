@@ -25,10 +25,10 @@ Present the user with this list and ask which avatar they want:
 | # | Avatar | ID | Status |
 |---|--------|-----|--------|
 | 1 | Jeff | `ccce0126b55f418e858ce9c7047eff1a` | ✓ verified |
-| 2 | Bob Commentator | `924e085127e14867814dc5f99d2f6419` | ✓ verified |
+| 2 | Bob Commentator | `7c5124f727b840bdb2fa66380ade0a0f` | ✓ verified (trained look) |
 | 3 | Bud The Caddy | `35a38a2bfbfe4d5ea33f1a8b8434aa06` | ✓ verified |
-| 4 | Pro Golfer | `1fd5fe07a84749fc88143d0640841d46` | ✓ verified |
-| 5 | Golf Cart Girl | `fee86c5c0bbe45f7954d2bd31046b6f9` | ✓ verified |
+| 4 | Pro Golfer | `3c4b06f3ae6b42adb456f7022f4dc9d1` | ✓ verified (trained look) |
+| 5 | Golf Cart Girl | `5de5fb82755e4ea198450101ae360c79` | ✓ verified (trained look) |
 
 Ask: "Which avatar would you like to use for this video?"
 
@@ -182,7 +182,7 @@ Use the `conversations_add_message` tool from the `slack` MCP to post the messag
 - **Script trigger fails**: Check `HEYGEN_API_KEY` is set and the avatar_id is a valid HeyGen UUID.
 
 ## Notes
-- **Fast path (V2):** ~1 min render, Avatar IV photorealistic motion, explicit `voice_id` required
+- **Fast path (V2):** ~1 min render typically; can take 15–20 min when HeyGen queues are busy. Avatar IV photorealistic motion, explicit `voice_id` required
 - **Cinematic path (Video Agent):** 12–30 min render, multi-scene production (drone + B-roll + outro), voice auto from avatar
 - Video URLs expire after 7 days (both paths)
 - Video Agent does not support `voice_id` — voice is determined by the avatar
