@@ -1,0 +1,31 @@
+name: Request Copilot Code Review
+
+# Formally requests `Copilot` as a reviewer on every PR. This is what triggers
+# GitHub's dynamic `copilot-pull-request-reviewer` status check — which the
+# AAA branch-protection ruleset requires as a status check before merge.
+#
+# Reviews on ruleset-auto-trigger alone do NOT create that status check.
+# Distributing this workflow to every active AAA repo is the mechanism that
+# makes "wait for Copilot before merging" enforceable platform-wide.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request-copilot-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Copilot review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr edit "$PR_NUMBER" \
+            --repo "$REPO" \
+            --add-reviewer "Copilot" \
+          || echo "::warning::Could not add Copilot reviewer — ensure Copilot Code Review is enabled at the org level: https://github.com/organizations/Automation-Architecture/settings/copilot/policies"
