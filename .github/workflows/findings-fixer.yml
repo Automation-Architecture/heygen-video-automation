@@ -1,0 +1,190 @@
+name: Auto-fix Copilot Findings
+
+# When Copilot posts inline findings on a PR, checks out the branch and
+# runs Claude Code to apply the fixes, then pushes a new commit. Copilot
+# re-reviews on the next push (via copilot-review.yml synchronize trigger).
+# Part of a three-workflow automation suite:
+#   findings-fixer.yml  — this file: auto-fix Copilot inline findings
+#   auto-merge.yml      — merge PRs once all checks pass (separate PR)
+#   dashboard-sync.yml  — sync client dashboard data (separate PR)
+# Note: auto-merge.yml and dashboard-sync.yml are being added via separate
+# PRs and may not yet be present in this repo.
+#
+# Loop-break: stops after 3 auto-fix commits on the same PR to prevent
+# runaway loops when fixes introduce new findings. After 3 attempts a
+# warning annotation is emitted and the loop exits — manual fix needed.
+#
+# Claude runs with:
+#   --bare                  skip hooks / MCP / skills / CLAUDE.md (reproducible CI)
+#   --allowedTools          Read, Edit, Write only — no Bash, no shell commands
+#   --permission-mode       bypassPermissions for the allowed tools (no prompts in CI)
+#
+# PREREQUISITE — one-time org secret setup:
+#   ANTHROPIC_API_KEY must be set as an org-level Actions secret.
+#   gh secret set ANTHROPIC_API_KEY --org Automation-Architecture
+#   Until set, the workflow exits with a warning (no failure).
+#
+# Rollout: copy to .github/workflows/ in every active repo
+# alongside auto-merge.yml and dashboard-sync.yml once those are merged.
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: findings-fixer-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  fix-findings:
+    # Only fire for Copilot reviews on same-repo PRs in private repositories.
+    # copilot-pull-request-reviewer[bot] is the login used on review events.
+    # Private-repo guard: prevents accidental code exfiltration to Anthropic API
+    # if this workflow is ever rolled out to a public repo.
+    if: |
+      github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.repository.private
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # ── Gate: check findings count + loop-break + secret presence ─────────
+      - name: Gate check
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.event.pull_request.head.sha }}"
+          REPO="${{ github.repository }}"
+          PR="${{ github.event.pull_request.number }}"
+
+          # Require ANTHROPIC_API_KEY.
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY not set — skipping auto-fix. See workflow header."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Count Copilot inline comments on HEAD SHA.
+          # Uses original_commit_id (not commit_id): GitHub re-attaches review comments
+          # forward via commit_id as new commits land, so commit_id would hide open
+          # findings on superseded commits. original_commit_id is stable and correct.
+          # Copilot login on /pulls/N/comments is "Copilot" (not the [bot] suffix
+          # used on review events — different endpoint, different identity string).
+          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
+          COUNT=$(gh api "/repos/$REPO/pulls/$PR/comments" --paginate \
+            --jq ".[] | select(
+              .original_commit_id == \"$SHA\" and
+              .user.login == \"Copilot\"
+            )" | jq -s 'length')
+
+          echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No Copilot inline findings on HEAD $SHA — nothing to fix."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Loop-break: count prior auto-fix commits on this PR.
+          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
+          FIX_COMMITS=$(gh api "/repos/$REPO/pulls/$PR/commits" --paginate \
+            --jq '.[] | select(.commit.message | startswith("fix(copilot): auto-fix"))' \
+            | jq -s 'length')
+
+          if [ "$FIX_COMMITS" -ge 3 ]; then
+            echo "::warning::Auto-fix loop-break: 3 attempts already on PR #$PR. Manual fix required."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "$COUNT finding(s) on HEAD — attempt $((FIX_COMMITS + 1))/3."
+
+      # ── Checkout the PR branch ─────────────────────────────────────────────
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Set up Node.js runtime ────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          node-version: '20'
+
+      # ── Install Claude Code CLI ────────────────────────────────────────────
+      - name: Install Claude Code
+        if: steps.gate.outputs.run == 'true'
+        run: npm install -g @anthropic-ai/claude-code@2.1.162
+
+      # ── Build prompt from findings ─────────────────────────────────────────
+      - name: Build findings prompt
+        if: steps.gate.outputs.run == 'true'
+        id: prompt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          REPO="${{ github.repository }}"
+          PR="${{ github.event.pull_request.number }}"
+
+          # Fetch findings with file + line + comment body.
+          # --jq emits a bare stream of formatted strings; jq -rs slurps and joins.
+          FINDINGS=$(gh api "/repos/$REPO/pulls/$PR/comments" --paginate \
+            --jq ".[] | select(
+              .original_commit_id == \"$SHA\" and
+              .user.login == \"Copilot\"
+            ) | \"[\" + .path + \":\" + ((.original_line // .line) | tostring) + \"]\\n\" + .body" \
+            | jq -rs 'join("\n\n---\n\n")')
+
+          # Write prompt to file — avoids shell quoting issues with long text.
+          printf '%s\n' "Fix every Copilot code review finding listed below. Each finding is prefixed [file:line]." > /tmp/findings-prompt.txt
+          printf '\n' >> /tmp/findings-prompt.txt
+          printf '%s\n' "$FINDINGS" >> /tmp/findings-prompt.txt
+          printf '\n%s\n' "Rules:" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- Fix ONLY the specific issues listed — no refactoring or cleanup beyond the exact fix" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- Read each affected file before editing" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- Do not add TODO comments, do not defer any finding" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- After all fixes are applied, stop" >> /tmp/findings-prompt.txt
+
+      # ── Run Claude to apply fixes ─────────────────────────────────────────
+      - name: Apply fixes with Claude Code
+        if: steps.gate.outputs.run == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude --bare \
+            --allowedTools "Read,Edit,Write" \
+            --permission-mode bypassPermissions \
+            -p "$(cat /tmp/findings-prompt.txt)"
+
+      # ── Commit and push ────────────────────────────────────────────────────
+      - name: Commit and push fixes
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            # Safety: abort if the LLM touched any workflow files — an automated
+            # commit to .github/workflows/** is a high-risk escalation vector.
+            if git status --porcelain | grep -q '\.github/workflows/'; then
+              echo "::warning::auto-fix touched .github/workflows/ — skipping commit. Manual review required."
+              exit 0
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            COUNT="${{ steps.gate.outputs.findings }}"
+            PR="${{ github.event.pull_request.number }}"
+            git commit -m "fix(copilot): auto-fix ${COUNT} finding(s) on PR #${PR}"
+            git push
+            echo "Fixes pushed. copilot-review.yml will trigger re-review via synchronize."
+          else
+            echo "No file changes — findings may require manual attention."
+          fi
