@@ -1,0 +1,140 @@
+name: Auto-Merge when Checks Green
+
+# Merges a PR automatically when the branch is ready:
+#   - All check-runs on HEAD SHA completed with no failures
+#   - Zero Copilot inline comments on the HEAD SHA
+#     (uses original_commit_id filter — commit_id would hide open findings
+#     that GitHub re-attaches forward as new commits land; see AAA convention)
+#   - Copilot login on /pulls/N/comments is "Copilot" (not the [bot] suffix
+#     used on /pulls/N/reviews — different endpoint, different identity string)
+#
+# Triggers:
+#   check_suite:completed — fires when a suite of checks finishes (CI, CodeRabbit, etc.)
+#   pull_request_review:submitted — fires when Copilot or CodeRabbit posts their review;
+#     often the last event before all conditions are met
+#
+# Merge strategy:
+#   1. gh pr merge --squash --delete-branch (normal merge, respects ruleset)
+#   2. gh pr merge --auto  --squash --delete-branch (queue native auto-merge if still BLOCKED)
+#   Deliberately NOT --admin. Admin bypass lives in aaa-merge / operator-explicit flows only.
+#
+# Rollout: copy this file to .github/workflows/ in every active repo (same as copilot-review.yml).
+
+on:
+  check_suite:
+    types: [completed]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+# One merge attempt per SHA at a time. Concurrent triggers for the same SHA
+# queue; once the first merges the PR, the rest find no open PR and exit clean.
+concurrency:
+  group: auto-merge-${{ github.repository }}-${{ github.event.check_suite.head_sha || github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    # Skip check_suite events that are not associated with any PR (e.g. direct
+    # pushes to the default branch) — avoids unnecessary API work.
+    if: |
+      github.event_name == 'pull_request_review' ||
+      github.event.check_suite.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate and merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # ── Resolve SHA and PR number ────────────────────────────────────
+          if [ "${{ github.event_name }}" = "check_suite" ]; then
+            SHA="${{ github.event.check_suite.head_sha }}"
+            # Use the payload's pull_requests array: it contains only same-repo PRs
+            # (GitHub excludes fork PRs from check_suite.pull_requests), so no fork
+            # guard is needed here and no extra API call is required.
+            PR_NUMBER="${{ github.event.check_suite.pull_requests[0].number }}"
+          else
+            # pull_request_review: skip PRs from forks — GITHUB_TOKEN is read-only there.
+            if [ "${{ github.event.pull_request.head.repo.full_name }}" != "$REPO" ]; then
+              echo "Fork PR — skipping."
+              exit 0
+            fi
+            SHA="${{ github.event.pull_request.head.sha }}"
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No open PR found for SHA $SHA — nothing to merge."
+            exit 0
+          fi
+          echo "PR #$PR_NUMBER  HEAD $SHA"
+
+          # ── Gate 1: at least one check-run, all completed, none failed ────
+          # Paginate: repos with many workflows can exceed 100 check-runs per SHA.
+          # --jq emits a bare stream of objects; jq -s slurps into a single array.
+          CHECK_RUNS=$(gh api "/repos/$REPO/commits/$SHA/check-runs" --paginate \
+            --jq '.check_runs[]' | jq -s '.')
+
+          TOTAL=$(echo "$CHECK_RUNS"   | jq 'length')
+          PENDING=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
+          FAILED=$(echo "$CHECK_RUNS"  | jq '[.[] | select(
+            .conclusion == "failure" or
+            .conclusion == "timed_out" or
+            .conclusion == "cancelled" or
+            .conclusion == "action_required"
+          )] | length')
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "No check-runs found for $SHA — not merging (no CI evidence)."
+            exit 0
+          fi
+          if [ "$PENDING" -gt 0 ]; then
+            echo "$PENDING check(s) still pending — not merging yet."
+            exit 0
+          fi
+          if [ "$FAILED" -gt 0 ]; then
+            echo "$FAILED check(s) failed — not merging."
+            exit 0
+          fi
+
+          # ── Gate 2: zero Copilot inline comments on HEAD SHA ──────────────
+          # /pulls/N/comments identity: "Copilot" (not "copilot-pull-request-reviewer[bot]")
+          # Filter on original_commit_id so resolved-but-line-valid comments
+          # that GitHub re-attaches forward via commit_id don't mask open findings.
+          # Paginate: large PRs can have >100 review comments.
+          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
+          COPILOT_COMMENTS=$(gh api "/repos/$REPO/pulls/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(
+              .original_commit_id == \"$SHA\" and
+              .user.login == \"Copilot\"
+            )" | jq -s 'length')
+
+          if [ "$COPILOT_COMMENTS" -gt 0 ]; then
+            echo "$COPILOT_COMMENTS Copilot inline finding(s) on HEAD $SHA — not merging."
+            exit 0
+          fi
+
+          # ── All gates passed — attempt merge ──────────────────────────────
+          echo "All checks green, 0 Copilot findings. Merging PR #$PR_NUMBER..."
+
+          # Try normal merge first; fall back to --auto if ruleset is still
+          # BLOCKED (e.g. request-copilot-review check hasn't flipped yet).
+          if gh pr merge "$PR_NUMBER" --squash --delete-branch --repo "$REPO" 2>&1; then
+            echo "Merged via squash."
+            exit 0
+          fi
+
+          if gh pr merge "$PR_NUMBER" --auto --squash --delete-branch --repo "$REPO" 2>&1; then
+            echo "Queued for auto-merge."
+            exit 0
+          fi
+
+          echo "::warning::Both merge attempts failed for PR #$PR_NUMBER. Manual merge may be needed."
+          exit 0
