@@ -32,11 +32,14 @@ permissions:
 
 jobs:
   fix-findings:
-    # Only fire for Copilot reviews on same-repo PRs.
+    # Only fire for Copilot reviews on same-repo PRs in private repositories.
     # copilot-pull-request-reviewer[bot] is the login used on review events.
+    # Private-repo guard: prevents accidental code exfiltration to Anthropic API
+    # if this workflow is ever rolled out to a public repo.
     if: |
       github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.repository.private
     runs-on: ubuntu-latest
     steps:
       # ── Gate: check findings count + loop-break + secret presence ─────────
@@ -62,11 +65,12 @@ jobs:
           # Uses original_commit_id (not commit_id) — same reasoning as auto-merge.yml.
           # Copilot login on /pulls/N/comments is "Copilot" (not the [bot] suffix
           # used on review events — different endpoint, different identity string).
+          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
           COUNT=$(gh api "/repos/$REPO/pulls/$PR/comments" --paginate \
-            --jq "[.[] | select(
+            --jq ".[] | select(
               .original_commit_id == \"$SHA\" and
               .user.login == \"Copilot\"
-            )] | length")
+            )" | jq -s 'length')
 
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
 
@@ -77,8 +81,10 @@ jobs:
           fi
 
           # Loop-break: count prior auto-fix commits on this PR.
+          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
           FIX_COMMITS=$(gh api "/repos/$REPO/pulls/$PR/commits" --paginate \
-            --jq '[.[] | select(.commit.message | startswith("fix(copilot): auto-fix"))] | length')
+            --jq '.[] | select(.commit.message | startswith("fix(copilot): auto-fix"))' \
+            | jq -s 'length')
 
           if [ "$FIX_COMMITS" -ge 3 ]; then
             echo "::warning::Auto-fix loop-break: 3 attempts already on PR #$PR. Manual fix required."
@@ -99,7 +105,7 @@ jobs:
       # ── Install Claude Code CLI ────────────────────────────────────────────
       - name: Install Claude Code
         if: steps.gate.outputs.run == 'true'
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.162
 
       # ── Build prompt from findings ─────────────────────────────────────────
       - name: Build findings prompt
@@ -113,27 +119,23 @@ jobs:
           PR="${{ github.event.pull_request.number }}"
 
           # Fetch findings with file + line + comment body.
+          # --jq emits a bare stream of formatted strings; jq -rs slurps and joins.
           FINDINGS=$(gh api "/repos/$REPO/pulls/$PR/comments" --paginate \
-            --jq "[.[] | select(
+            --jq ".[] | select(
               .original_commit_id == \"$SHA\" and
               .user.login == \"Copilot\"
-            ) | \"[\" + .path + \":\" + ((.original_line // .line) | tostring) + \"]\\n\" + .body
-            ] | join(\"\\n\\n---\\n\\n\")")
+            ) | \"[\" + .path + \":\" + ((.original_line // .line) | tostring) + \"]\\n\" + .body" \
+            | jq -rs 'join("\n\n---\n\n")')
 
           # Write prompt to file — avoids shell quoting issues with long text.
-          cat > /tmp/findings-prompt.txt << 'PROMPT_EOF'
-Fix every Copilot code review finding listed below. Each finding is prefixed [file:line].
-
-PROMPT_EOF
+          printf '%s\n' "Fix every Copilot code review finding listed below. Each finding is prefixed [file:line]." > /tmp/findings-prompt.txt
+          printf '\n' >> /tmp/findings-prompt.txt
           printf '%s\n' "$FINDINGS" >> /tmp/findings-prompt.txt
-          cat >> /tmp/findings-prompt.txt << 'PROMPT_EOF'
-
-Rules:
-- Fix ONLY the specific issues listed — no refactoring or cleanup beyond the exact fix
-- Read each affected file before editing
-- Do not add TODO comments, do not defer any finding
-- After all fixes are applied, stop
-PROMPT_EOF
+          printf '\n%s\n' "Rules:" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- Fix ONLY the specific issues listed — no refactoring or cleanup beyond the exact fix" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- Read each affected file before editing" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- Do not add TODO comments, do not defer any finding" >> /tmp/findings-prompt.txt
+          printf '%s\n' "- After all fixes are applied, stop" >> /tmp/findings-prompt.txt
 
       # ── Run Claude to apply fixes ─────────────────────────────────────────
       - name: Apply fixes with Claude Code
@@ -151,6 +153,12 @@ PROMPT_EOF
         if: steps.gate.outputs.run == 'true'
         run: |
           if [ -n "$(git status --porcelain)" ]; then
+            # Safety: abort if the LLM touched any workflow files — an automated
+            # commit to .github/workflows/** is a high-risk escalation vector.
+            if git status --porcelain | grep -q '\.github/workflows/'; then
+              echo "::warning::auto-fix touched .github/workflows/ — skipping commit. Manual review required."
+              exit 0
+            fi
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add .
