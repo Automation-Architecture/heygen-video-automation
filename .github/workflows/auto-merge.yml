@@ -29,6 +29,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: read
 
 # One merge attempt per SHA at a time. Concurrent triggers for the same SHA
 # queue; once the first merges the PR, the rest find no open PR and exit clean.
@@ -38,21 +39,27 @@ concurrency:
 
 jobs:
   auto-merge:
+    # Skip check_suite events that are not associated with any PR (e.g. direct
+    # pushes to the default branch) — avoids unnecessary API work.
+    if: |
+      github.event_name == 'pull_request_review' ||
+      github.event.check_suite.pull_requests[0] != null
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate and merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          REPO="${{ github.repository }}"
 
           # ── Resolve SHA and PR number ────────────────────────────────────
           if [ "${{ github.event_name }}" = "check_suite" ]; then
             SHA="${{ github.event.check_suite.head_sha }}"
-            # Paginate: repos with >100 open PRs would otherwise silently miss the match.
-            PR_NUMBER=$(gh api "/repos/$REPO/pulls?state=open" --paginate \
-              --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -1)
+            # Use the payload's pull_requests array: it contains only same-repo PRs
+            # (GitHub excludes fork PRs from check_suite.pull_requests), so no fork
+            # guard is needed here and no extra API call is required.
+            PR_NUMBER="${{ github.event.check_suite.pull_requests[0].number }}"
           else
             # pull_request_review: skip PRs from forks — GITHUB_TOKEN is read-only there.
             if [ "${{ github.event.pull_request.head.repo.full_name }}" != "$REPO" ]; then
@@ -71,8 +78,9 @@ jobs:
 
           # ── Gate 1: at least one check-run, all completed, none failed ────
           # Paginate: repos with many workflows can exceed 100 check-runs per SHA.
+          # --jq emits a bare stream of objects; jq -s slurps into a single array.
           CHECK_RUNS=$(gh api "/repos/$REPO/commits/$SHA/check-runs" --paginate \
-            --jq '[.check_runs[]]')
+            --jq '.check_runs[]' | jq -s '.')
 
           TOTAL=$(echo "$CHECK_RUNS"   | jq 'length')
           PENDING=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
@@ -101,11 +109,12 @@ jobs:
           # Filter on original_commit_id so resolved-but-line-valid comments
           # that GitHub re-attaches forward via commit_id don't mask open findings.
           # Paginate: large PRs can have >100 review comments.
+          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
           COPILOT_COMMENTS=$(gh api "/repos/$REPO/pulls/$PR_NUMBER/comments" --paginate \
-            --jq "[.[] | select(
+            --jq ".[] | select(
               .original_commit_id == \"$SHA\" and
               .user.login == \"Copilot\"
-            )] | length")
+            )" | jq -s 'length')
 
           if [ "$COPILOT_COMMENTS" -gt 0 ]; then
             echo "$COPILOT_COMMENTS Copilot inline finding(s) on HEAD $SHA — not merging."
