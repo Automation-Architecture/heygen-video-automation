@@ -1,0 +1,72 @@
+name: Sync Client Dashboard on PR Merge
+
+# When a PR merges to the default branch, dispatches a targeted sync to
+# aaa-client-dashboard. The sync workflows there look up the slug whose
+# source_repo matches this repo and update github_activity + sprint-progress.
+#
+# The dispatch is targeted (one slug, not all slugs), so it completes in
+# seconds rather than iterating the full slugs.yaml. Repos not mapped in
+# slugs.yaml produce a no-op dispatch that the sync workflows handle cleanly
+# (no matching slug found → no work done → no data committed).
+#
+# PREREQUISITE — one-time org secret setup:
+#   DASHBOARD_DISPATCH_TOKEN must be set as an org-level Actions secret.
+#   It needs Actions:Write on Automation-Architecture/aaa-client-dashboard.
+#
+#   Create a fine-grained PAT at https://github.com/settings/tokens?type=beta:
+#     Resource owner : Automation-Architecture
+#     Repository access: Only select → aaa-client-dashboard
+#     Permission: Actions = Read and write
+#
+#   Then set it:
+#     gh secret set DASHBOARD_DISPATCH_TOKEN \
+#       --org Automation-Architecture \
+#       --body "$(op read 'op://aaa-APIs/<item>/credential')"
+#
+#   Until the secret is set, this workflow exits with a warning (no failure).
+#
+# Rollout: copy this file to .github/workflows/ in every active repo
+# (same rollout pattern as copilot-review.yml and auto-merge.yml).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: none
+
+jobs:
+  trigger-dashboard-sync:
+    # Only fire on actual merges (not closed-without-merge).
+    # Skip fork PRs — they won't have the org secret.
+    if: |
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch targeted dashboard sync
+        env:
+          GH_TOKEN: ${{ secrets.DASHBOARD_DISPATCH_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DASHBOARD_DISPATCH_TOKEN not set — skipping dashboard sync."
+            echo "See workflow header for one-time setup instructions."
+            exit 0
+          fi
+
+          # Build payload and dispatch. The sync workflows in aaa-client-dashboard
+          # look up the slug by matching source_repo == REPO in slugs.yaml.
+          PAYLOAD=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson pr "$PR_NUMBER" \
+            --arg sha "$MERGE_SHA" \
+            '{event_type: "dashboard-sync", client_payload: {repo: $repo, pr: $pr, sha: $sha}}')
+
+          gh api repos/Automation-Architecture/aaa-client-dashboard/dispatches \
+            -X POST \
+            --input - <<< "$PAYLOAD"
+
+          echo "Dispatched dashboard-sync for $REPO (PR #$PR_NUMBER, sha=$MERGE_SHA)"
