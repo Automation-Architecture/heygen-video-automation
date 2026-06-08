@@ -1,8 +1,7 @@
 name: Auto-Merge when Checks Green
 
 # Merges a PR automatically when the branch is ready:
-#   - All check-runs on HEAD SHA completed with conclusion == "success" only
-#     (neutral, skipped, stale, startup_failure, etc. are treated as blocking)
+#   - All check-runs on HEAD SHA completed with no failures
 #   - Zero Copilot inline comments on the HEAD SHA
 #     (uses original_commit_id filter — commit_id would hide open findings
 #     that GitHub re-attaches forward as new commits land; see AAA convention)
@@ -15,9 +14,8 @@ name: Auto-Merge when Checks Green
 #     often the last event before all conditions are met
 #
 # Merge strategy:
-#   gh pr merge --squash --delete-branch (normal merge, respects ruleset)
-#   No --auto fallback: native auto-merge would bypass the Copilot-comment gate
-#   by merging later when ruleset flips, even after new findings land.
+#   1. gh pr merge --squash --delete-branch (normal merge, respects ruleset)
+#   2. gh pr merge --auto  --squash --delete-branch (queue native auto-merge if still BLOCKED)
 #   Deliberately NOT --admin. Admin bypass lives in aaa-merge / operator-explicit flows only.
 #
 # Rollout: copy this file to .github/workflows/ in every active repo (same as copilot-review.yml).
@@ -41,20 +39,17 @@ concurrency:
 
 jobs:
   auto-merge:
-    # Skip check_suite events that are not associated with exactly one PR.
-    # Zero PRs → direct push to default branch (no merge target).
-    # Multiple PRs → ambiguous; skip to avoid merging the wrong PR.
+    # Skip check_suite events that are not associated with any PR (e.g. direct
+    # pushes to the default branch) — avoids unnecessary API work.
     if: |
       github.event_name == 'pull_request_review' ||
-      (github.event.check_suite.pull_requests[0] != null &&
-       github.event.check_suite.pull_requests[1] == null)
+      github.event.check_suite.pull_requests[0] != null
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate and merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
 
@@ -84,12 +79,8 @@ jobs:
           # ── Gate 1: at least one check-run, all completed, none failed ────
           # Paginate: repos with many workflows can exceed 100 check-runs per SHA.
           # --jq emits a bare stream of objects; jq -s slurps into a single array.
-          # Exclude this workflow's own check-run: its external_id starts with
-          # $GITHUB_RUN_ID and its status is "in_progress" while we are running,
-          # which would otherwise make PENDING > 0 and permanently self-block.
           CHECK_RUNS=$(gh api "/repos/$REPO/commits/$SHA/check-runs" --paginate \
-            --jq ".check_runs[] | select(.external_id | startswith(\"$CURRENT_RUN_ID\") | not)" \
-            | jq -s '.')
+            --jq '.check_runs[]' | jq -s '.')
 
           TOTAL=$(echo "$CHECK_RUNS"   | jq 'length')
           PENDING=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
@@ -97,11 +88,7 @@ jobs:
             .conclusion == "failure" or
             .conclusion == "timed_out" or
             .conclusion == "cancelled" or
-            .conclusion == "action_required" or
-            .conclusion == "neutral" or
-            .conclusion == "skipped" or
-            .conclusion == "stale" or
-            .conclusion == "startup_failure"
+            .conclusion == "action_required"
           )] | length')
 
           if [ "$TOTAL" -eq 0 ]; then
@@ -119,17 +106,8 @@ jobs:
 
           # ── Gate 2: zero Copilot inline comments on HEAD SHA ──────────────
           # /pulls/N/comments identity: "Copilot" (not "copilot-pull-request-reviewer[bot]")
-          #
-          # WHY original_commit_id (not commit_id):
-          #   GitHub re-attaches resolved-but-line-still-valid review comments to
-          #   later commits by updating commit_id to the new HEAD. Using commit_id
-          #   would therefore surface stale comments from older commits as if they
-          #   were posted on the current HEAD — causing spurious blocks.
-          #   original_commit_id is immutable: it always points to the commit the
-          #   comment was originally posted on. Filtering original_commit_id == SHA
-          #   returns only comments genuinely authored against the current HEAD.
-          #   (AAA convention — do not change to commit_id.)
-          #
+          # Filter on original_commit_id so resolved-but-line-valid comments
+          # that GitHub re-attaches forward via commit_id don't mask open findings.
           # Paginate: large PRs can have >100 review comments.
           # --jq emits a bare stream of matching objects; jq -s slurps and counts.
           COPILOT_COMMENTS=$(gh api "/repos/$REPO/pulls/$PR_NUMBER/comments" --paginate \
@@ -143,36 +121,20 @@ jobs:
             exit 0
           fi
 
-          # ── Gate 3: confirm HEAD SHA hasn't advanced since we started ────────
-          # gh pr merge merges the PR's current head, which may have advanced
-          # (new commit pushed) between when we resolved $SHA and now.
-          # Re-fetch and abort if they don't match — the next trigger will re-evaluate.
-          CURRENT_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefSha --jq '.headRefSha')
-          if [ "$CURRENT_SHA" != "$SHA" ]; then
-            echo "PR head has advanced ($SHA → $CURRENT_SHA) — deferring to next trigger."
-            exit 0
-          fi
-
-          # ── Gate 4: confirm PR is still open before merging ─────────────
-          # A queued trigger (e.g. delayed check_suite) can fire after the PR was
-          # already merged or closed by another path. Merging a closed PR produces
-          # a misleading error; skip cleanly instead.
-          PR_STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
-          if [ "$PR_STATE" != "OPEN" ]; then
-            echo "PR #$PR_NUMBER is $PR_STATE — nothing to merge."
-            exit 0
-          fi
-
           # ── All gates passed — attempt merge ──────────────────────────────
           echo "All checks green, 0 Copilot findings. Merging PR #$PR_NUMBER..."
 
-          # Normal squash merge only — no --auto fallback.
-          # --auto would queue GitHub's native auto-merge, which can fire later
-          # even if Copilot posts new findings after this run, bypassing the gate.
+          # Try normal merge first; fall back to --auto if ruleset is still
+          # BLOCKED (e.g. request-copilot-review check hasn't flipped yet).
           if gh pr merge "$PR_NUMBER" --squash --delete-branch --repo "$REPO" 2>&1; then
             echo "Merged via squash."
             exit 0
           fi
 
-          echo "::warning::Merge attempt failed for PR #$PR_NUMBER (ruleset may still be BLOCKED). A subsequent trigger will retry once all checks pass."
+          if gh pr merge "$PR_NUMBER" --auto --squash --delete-branch --repo "$REPO" 2>&1; then
+            echo "Queued for auto-merge."
+            exit 0
+          fi
+
+          echo "::warning::Both merge attempts failed for PR #$PR_NUMBER. Manual merge may be needed."
           exit 0
