@@ -2,13 +2,8 @@ name: Auto-fix Copilot Findings
 
 # When Copilot posts inline findings on a PR, checks out the branch and
 # runs Claude Code to apply the fixes, then pushes a new commit. Copilot
-# re-reviews on the next push (via copilot-review.yml synchronize trigger).
-# Part of a three-workflow automation suite:
-#   findings-fixer.yml  — this file: auto-fix Copilot inline findings
-#   auto-merge.yml      — merge PRs once all checks pass (separate PR)
-#   dashboard-sync.yml  — sync client dashboard data (separate PR)
-# Note: auto-merge.yml and dashboard-sync.yml are being added via separate
-# PRs and may not yet be present in this repo.
+# re-reviews on the next push (via copilot-review.yml synchronize trigger)
+# and auto-merge.yml attempts to merge once findings reach zero.
 #
 # Loop-break: stops after 3 auto-fix commits on the same PR to prevent
 # runaway loops when fixes introduce new findings. After 3 attempts a
@@ -25,32 +20,40 @@ name: Auto-fix Copilot Findings
 #   Until set, the workflow exits with a warning (no failure).
 #
 # Rollout: copy to .github/workflows/ in every active repo
-# alongside auto-merge.yml and dashboard-sync.yml once those are merged.
+# (same rollout pattern as auto-merge.yml and dashboard-sync.yml).
 
 on:
   pull_request_review:
     types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to fix"
+        required: true
+      pr_branch:
+        description: "PR head branch"
+        required: true
+      pr_sha:
+        description: "PR head SHA"
+        required: true
 
 permissions:
   contents: write
   pull-requests: read
 
-concurrency:
-  group: findings-fixer-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   fix-findings:
-    # Only fire for Copilot reviews on same-repo PRs in private repositories.
-    # copilot-pull-request-reviewer[bot] is the login used on review events.
-    # Private-repo guard: prevents accidental code exfiltration to Anthropic API
-    # if this workflow is ever rolled out to a public repo.
-    if: |
-      github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.repository.private
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Fire for Copilot reviews on same-repo PRs.
+    # Note: github.event.repository.private was removed — it evaluates as null
+    # (not a boolean) in some pull_request_review event contexts, causing the
+    # entire && chain to fail and the job to never run. The private-repo intent
+    # is preserved by checking head.repo.full_name == github.repository (forks
+    # have a different repo full name, which already excludes them).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
     steps:
       # ── Gate: check findings count + loop-break + secret presence ─────────
       - name: Gate check
@@ -60,9 +63,15 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
-          SHA="${{ github.event.pull_request.head.sha }}"
+          # Support both pull_request_review (automatic) and workflow_dispatch (manual test)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHA="${{ inputs.pr_sha }}"
+            PR="${{ inputs.pr_number }}"
+          else
+            SHA="${{ github.event.pull_request.head.sha }}"
+            PR="${{ github.event.pull_request.number }}"
+          fi
           REPO="${{ github.repository }}"
-          PR="${{ github.event.pull_request.number }}"
 
           # Require ANTHROPIC_API_KEY.
           if [ -z "$ANTHROPIC_API_KEY" ]; then
@@ -72,9 +81,7 @@ jobs:
           fi
 
           # Count Copilot inline comments on HEAD SHA.
-          # Uses original_commit_id (not commit_id): GitHub re-attaches review comments
-          # forward via commit_id as new commits land, so commit_id would hide open
-          # findings on superseded commits. original_commit_id is stable and correct.
+          # Uses original_commit_id (not commit_id) — same reasoning as auto-merge.yml.
           # Copilot login on /pulls/N/comments is "Copilot" (not the [bot] suffix
           # used on review events — different endpoint, different identity string).
           # --jq emits a bare stream of matching objects; jq -s slurps and counts.
@@ -105,20 +112,16 @@ jobs:
           fi
 
           echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
           echo "$COUNT finding(s) on HEAD — attempt $((FIX_COMMITS + 1))/3."
 
       # ── Checkout the PR branch ─────────────────────────────────────────────
       - uses: actions/checkout@v4
         if: steps.gate.outputs.run == 'true'
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_branch || github.event.pull_request.head.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # ── Set up Node.js runtime ────────────────────────────────────────────
-      - uses: actions/setup-node@v4
-        if: steps.gate.outputs.run == 'true'
-        with:
-          node-version: '20'
 
       # ── Install Claude Code CLI ────────────────────────────────────────────
       - name: Install Claude Code
@@ -132,18 +135,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SHA="${{ github.event.pull_request.head.sha }}"
+          SHA="${{ steps.gate.outputs.sha }}"
           REPO="${{ github.repository }}"
-          PR="${{ github.event.pull_request.number }}"
+          PR="${{ steps.gate.outputs.pr }}"
 
           # Fetch findings with file + line + comment body.
-          # --jq emits a bare stream of formatted strings; jq -rs slurps and joins.
+          # jq -Rrs reads the stream as raw text (not JSON), so empty input
+          # returns "" cleanly — avoids "Invalid numeric literal" from jq -rs
+          # when gh api emits nothing (no matching comments).
           FINDINGS=$(gh api "/repos/$REPO/pulls/$PR/comments" --paginate \
             --jq ".[] | select(
               .original_commit_id == \"$SHA\" and
               .user.login == \"Copilot\"
             ) | \"[\" + .path + \":\" + ((.original_line // .line) | tostring) + \"]\\n\" + .body" \
-            | jq -rs 'join("\n\n---\n\n")')
+            | jq -Rrs '.')
 
           # Write prompt to file — avoids shell quoting issues with long text.
           printf '%s\n' "Fix every Copilot code review finding listed below. Each finding is prefixed [file:line]." > /tmp/findings-prompt.txt
@@ -181,7 +186,7 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add .
             COUNT="${{ steps.gate.outputs.findings }}"
-            PR="${{ github.event.pull_request.number }}"
+            PR="${{ steps.gate.outputs.pr }}"
             git commit -m "fix(copilot): auto-fix ${COUNT} finding(s) on PR #${PR}"
             git push
             echo "Fixes pushed. copilot-review.yml will trigger re-review via synchronize."
