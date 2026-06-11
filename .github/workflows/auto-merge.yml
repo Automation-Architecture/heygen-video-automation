@@ -2,15 +2,14 @@ name: Auto-Merge when Checks Green
 
 # Merges a PR automatically when the branch is ready:
 #   - All check-runs on HEAD SHA completed with no failures
-#   - Zero Copilot inline comments on the HEAD SHA
-#     (uses original_commit_id filter — commit_id would hide open findings
-#     that GitHub re-attaches forward as new commits land; see AAA convention)
-#   - Copilot login on /pulls/N/comments is "Copilot" (not the [bot] suffix
-#     used on /pulls/N/reviews — different endpoint, different identity string)
+#
+# CodeRabbit is the sole required reviewer; the merge step respects the org
+# ruleset, so it can never merge before the required CodeRabbit check is green.
+# (The Copilot inline-comment gate was removed 2026-06-11 with the Copilot reviewer.)
 #
 # Triggers:
 #   check_suite:completed — fires when a suite of checks finishes (CI, CodeRabbit, etc.)
-#   pull_request_review:submitted — fires when Copilot or CodeRabbit posts their review;
+#   pull_request_review:submitted — fires when CodeRabbit posts its review;
 #     often the last event before all conditions are met
 #
 # Merge strategy:
@@ -18,7 +17,7 @@ name: Auto-Merge when Checks Green
 #   2. gh pr merge --auto  --squash --delete-branch (queue native auto-merge if still BLOCKED)
 #   Deliberately NOT --admin. Admin bypass lives in aaa-merge / operator-explicit flows only.
 #
-# Rollout: copy this file to .github/workflows/ in every active repo (same as copilot-review.yml).
+# Rollout: copy this file to .github/workflows/ in every active repo.
 
 on:
   check_suite:
@@ -76,7 +75,7 @@ jobs:
           fi
           echo "PR #$PR_NUMBER  HEAD $SHA"
 
-          # ── Gate 1: at least one check-run, all completed, none failed ────
+          # ── Gate: at least one check-run, all completed, none failed ──────
           # Paginate: repos with many workflows can exceed 100 check-runs per SHA.
           # --jq emits a bare stream of objects; jq -s slurps into a single array.
           CHECK_RUNS=$(gh api "/repos/$REPO/commits/$SHA/check-runs" --paginate \
@@ -104,28 +103,11 @@ jobs:
             exit 0
           fi
 
-          # ── Gate 2: zero Copilot inline comments on HEAD SHA ──────────────
-          # /pulls/N/comments identity: "Copilot" (not "copilot-pull-request-reviewer[bot]")
-          # Filter on original_commit_id so resolved-but-line-valid comments
-          # that GitHub re-attaches forward via commit_id don't mask open findings.
-          # Paginate: large PRs can have >100 review comments.
-          # --jq emits a bare stream of matching objects; jq -s slurps and counts.
-          COPILOT_COMMENTS=$(gh api "/repos/$REPO/pulls/$PR_NUMBER/comments" --paginate \
-            --jq ".[] | select(
-              .original_commit_id == \"$SHA\" and
-              .user.login == \"Copilot\"
-            )" | jq -s 'length')
-
-          if [ "$COPILOT_COMMENTS" -gt 0 ]; then
-            echo "$COPILOT_COMMENTS Copilot inline finding(s) on HEAD $SHA — not merging."
-            exit 0
-          fi
-
-          # ── All gates passed — attempt merge ──────────────────────────────
-          echo "All checks green, 0 Copilot findings. Merging PR #$PR_NUMBER..."
+          # ── All checks green — attempt merge ──────────────────────────────
+          echo "All checks green. Merging PR #$PR_NUMBER..."
 
           # Try normal merge first; fall back to --auto if ruleset is still
-          # BLOCKED (e.g. request-copilot-review check hasn't flipped yet).
+          # BLOCKED (e.g. the CodeRabbit check hasn't flipped green yet).
           if gh pr merge "$PR_NUMBER" --squash --delete-branch --repo "$REPO" 2>&1; then
             echo "Merged via squash."
             exit 0
