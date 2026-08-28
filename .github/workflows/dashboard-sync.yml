@@ -19,14 +19,39 @@ name: Sync Client Dashboard on PR Merge
 #     Permission: Actions = Read and write
 #
 #   Then set it:
-#     gh secret set DASHBOARD_DISPATCH_TOKEN \
-#       --org Automation-Architecture \
-#       --body "$(op read 'op://aaa-APIs/<item>/credential')"
+#     env -u OP_SERVICE_ACCOUNT_TOKEN \
+#       op read 'op://aaa-APIs/<item>/credential' \
+#       | gh secret set DASHBOARD_DISPATCH_TOKEN --org Automation-Architecture
+#
+#   Two deliberate details:
+#
+#   1. `env -u OP_SERVICE_ACCOUNT_TOKEN` — this token lives in the SHARED
+#      `aaa-APIs` vault, not the client vault, so the client-scoped service
+#      account exported by .envrc cannot read it (by design). Unsetting the
+#      variable for this one command falls back to your personal `op` session,
+#      which can. Scope is dropped for a single command, not for the shell.
+#
+#   2. Piped, not `--body "$(...)"` — a command substitution puts the token in
+#      the process argument list, where it is visible to `ps` and lands in
+#      shell history. `gh secret set` reads the value from stdin when --body
+#      is omitted.
+#
+#   This is a one-off, org-level setup step: the secret is set once for
+#   Automation-Architecture and inherited by every repo. It is not part of
+#   per-client setup. See docs/client-onboarding.md ("Shared-vault operations").
 #
 #   Until the secret is set, this workflow exits with a warning (no failure).
 #
 # Rollout: copy this file to .github/workflows/ in every active repo
 # (same rollout pattern as copilot-review.yml and auto-merge.yml).
+#
+# GATE — only repos that back a dashboard should dispatch. Set the repo
+# Actions variable DASHBOARD_SLUG to the slug from aaa-client-dashboard's
+# slugs.yaml (e.g. `gh variable set DASHBOARD_SLUG --body kidneyhood`).
+# Repos without it evaluate the job condition and stop before a runner is
+# ever allocated, which is the entire point: this file is present in ~60
+# repos but only ~13 have a dashboard, and every merge in the other ~50
+# used to spin two runners on aaa-client-dashboard that did nothing.
 
 on:
   pull_request:
@@ -39,9 +64,11 @@ jobs:
   trigger-dashboard-sync:
     # Only fire on actual merges (not closed-without-merge).
     # Skip fork PRs — they won't have the org secret.
+    # Skip repos with no DASHBOARD_SLUG — nothing to sync, so no runner.
     if: |
       github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.DASHBOARD_SLUG != ''
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch targeted dashboard sync
@@ -50,6 +77,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          SLUG: ${{ vars.DASHBOARD_SLUG }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning::DASHBOARD_DISPATCH_TOKEN not set — skipping dashboard sync."
@@ -59,14 +87,17 @@ jobs:
 
           # Build payload and dispatch. The sync workflows in aaa-client-dashboard
           # look up the slug by matching source_repo == REPO in slugs.yaml.
+          # `slug` is carried so the receiver can skip its slugs.yaml scan;
+          # `repo` is kept for receivers that still match on source_repo.
           PAYLOAD=$(jq -n \
             --arg repo "$REPO" \
+            --arg slug "$SLUG" \
             --argjson pr "$PR_NUMBER" \
             --arg sha "$MERGE_SHA" \
-            '{event_type: "dashboard-sync", client_payload: {repo: $repo, pr: $pr, sha: $sha}}')
+            '{event_type: "dashboard-sync", client_payload: {repo: $repo, slug: $slug, pr: $pr, sha: $sha}}')
 
           gh api repos/Automation-Architecture/aaa-client-dashboard/dispatches \
             -X POST \
             --input - <<< "$PAYLOAD"
 
-          echo "Dispatched dashboard-sync for $REPO (PR #$PR_NUMBER, sha=$MERGE_SHA)"
+          echo "Dispatched dashboard-sync for $REPO slug=$SLUG (PR #$PR_NUMBER, sha=$MERGE_SHA)"
