@@ -1,122 +1,335 @@
-name: Auto-Merge when Checks Green
+name: Auto-Merge when Checks Green and Reviews In
 
-# Merges a PR automatically when the branch is ready:
-#   - All check-runs on HEAD SHA completed with no failures
+# Squash-merges a PR once check-runs on the HEAD SHA are green AND every
+# required reviewer has reviewed. A PR whose required review is missing is
+# HELD. It is never merged unreviewed.
 #
-# CodeRabbit is the sole required reviewer; the merge step respects the org
-# ruleset, so it can never merge before the required CodeRabbit check is green.
-# (The Copilot inline-comment gate was removed 2026-06-11 with the Copilot reviewer.)
+# ── Why a hard hold, and why there is no grace period any more ─────────────
+# Two defects shaped this gate:
+#   - A RACE: on aaa-runbooks#74 the workflow merged 77 seconds before Codex
+#     submitted a review reporting a broken snippet. Holding until the review
+#     exists closes that completely; no timer is needed for it.
+#   - A DEADLOCK: requiring a review of the current HEAD SHA blocks forever
+#     because Codex reviews on PR open / `@codex review`, NOT on push. So a
+#     review of ANY commit satisfies Gate 2 (aaa-runbooks #77 -> #78), and
+#     Gate 3 covers what that review actually said.
 #
-# Triggers:
-#   check_suite:completed — fires when a suite of checks finishes (CI, CodeRabbit, etc.)
-#   pull_request_review:submitted — fires when CodeRabbit posts its review;
-#     often the last event before all conditions are met
+# The previous version added a REVIEW_GRACE_SECONDS expiry that merged
+# UNREVIEWED after 600s "so a repo without Codex is not blocked forever".
+# Generalised to the org that is the wrong trade: measured 2026-09-10, 34 of
+# the 62 active repos carrying this workflow have never had a Codex review,
+# and on every one of them the expiry would have merged every green PR ten
+# minutes after opening with nobody having read it. Those repos have never
+# auto-merged anyway (the old check_suite trigger was dead), so holding loses
+# nothing there and stops unreviewed merges everywhere.
 #
-# Merge strategy:
-#   1. gh pr merge --squash --delete-branch (normal merge, respects ruleset)
-#   2. gh pr merge --auto  --squash --delete-branch (queue native auto-merge if still BLOCKED)
-#   Deliberately NOT --admin. Admin bypass lives in aaa-merge / operator-explicit flows only.
+# THE RESULTING ORG POLICY IS DELIBERATE: enabling Codex on a repo (per-repo,
+# in ChatGPT settings) is the switch that turns auto-merge on for that repo.
+# Without it, every PR holds and a human merges via aaa-merge. If Codex is
+# rate-limited or posts a skip notice, the PR holds too. That is correct.
 #
-# Rollout: copy this file to .github/workflows/ in every active repo.
+# BE CLEAR ABOUT WHAT THIS GUARANTEES: a review was SUBMITTED and left no
+# unresolved thread. It is NOT an approval gate; Codex posts COMMENTED, never
+# APPROVED. A genuine approval requirement belongs in branch protection.
+#
+# ── Why Gate 3 exists ──────────────────────────────────────────────────────
+# Gate 2 asks "did the reviewer show up", which is not the same question as
+# "was the reviewer happy". Because Codex posts COMMENTED and never
+# CHANGES_REQUESTED, a review REPORTING DEFECTS satisfied Gate 2 exactly as
+# well as a clean one. PR #97 merged 3m35s after Codex filed two P2 findings
+# on it — the gate saw one review from the one required reviewer, called it
+# 1/1, and merged; both defects reached main and needed #98 to undo.
+#
+# So Gate 3 reads the findings themselves, not the envelope they arrived in:
+# any unresolved, non-outdated review thread blocks the merge. A thread goes
+# outdated by itself when a follow-up commit rewrites the lines it points at,
+# so pushing a fix clears the block without anyone touching the PR — this
+# does NOT reintroduce the push-deadlock that #77 -> #78 reverted. A finding
+# nobody addresses blocks until a human resolves the thread, which is the
+# intended outcome, and nothing in this file is allowed to paper over it.
+#
+# claude[bot] is deliberately NOT in REQUIRED_REVIEWERS: as of 2026-08-31 every
+# review it posts is "Code review skipped — your organization's overage spend
+# limit has been reached". Requiring a skip notice is worse than requiring
+# nothing. Re-add it once an admin raises the limit at
+# claude.ai/admin-settings/claude-code.
+#
+# ── Triggers ───────────────────────────────────────────────────────────────
+#   workflow_run          — CI finished. Usually BEFORE the review bots submit.
+#   pull_request_review   — a review landed; re-evaluate immediately.
+#   (pull_request_review_thread is NOT accepted by GitHub Actions; see `on:`)
+#   workflow_dispatch     — the org-level sweeper (auto-merge-sweep.yml in
+#                           Automation-Architecture/.github) dispatches this
+#                           on a schedule for every repo that has open PRs.
+#                           That is what picks up a resolved review thread,
+#                           which has no trigger of its own. There is
+#                           deliberately NO per-repo `schedule:` here: one
+#                           cron in ~62 repos bills ~62 runner-minutes per
+#                           tick whether or not anything is open.
+#
+# Uses workflow_run (not check_suite) because GitHub does not emit check_suite
+# events for GITHUB_TOKEN-run CI workflows. workflow_run is always emitted.
+#
+# ── Governance / rollout ───────────────────────────────────────────────────
+# THIS IS THE CANONICAL COPY (Automation-Architecture/.github). Edit shared
+# behaviour HERE, never in a per-repo copy. Per-repo copies are synced only
+# through rollout PRs that rollout-monitor.yml drains; it never writes to a
+# repo's own main, so a repo that hand-edited its copy keeps that edit.
+#
+# Merge strategy: squash only, and deliberately NOT --admin, so this respects
+# whatever the repo's ruleset requires. Admin bypass lives in aaa-merge and
+# other operator-explicit flows, never here. Note the corollary: on a repo
+# whose ruleset requires no reviews, "respects the ruleset" constrains nothing,
+# and Gates 1-3 below are the only thing standing between a PR and main.
+#
+# There is deliberately NO `--auto` fallback. Queuing native auto-merge hands
+# the decision to GitHub, which merges once the blocking requirement clears
+# WITHOUT re-running anything here — every gate and the head pin bypassed. The
+# previous canonical did this. The org-level sweep re-dispatches instead.
+#
 
 on:
-  check_suite:
+  workflow_run:
+    # Union of the CI workflow names actually in use across the org ("CI" in
+    # 12 repos, "PR Autopilot" in 4, as of 2026-09-09). Naming a workflow a
+    # repo does not have is harmless - it simply never fires there.
+    #
+    # This trigger is a LATENCY optimisation, not a correctness requirement:
+    # the */10 sweep below re-evaluates every open PR regardless of what a
+    # repo calls its CI workflow, so a repo using neither name still merges,
+    # just up to 10 minutes later. Do not add repo-specific names here; let
+    # the sweep cover them.
+    workflows: ["CI", "PR Autopilot"]
     types: [completed]
   pull_request_review:
-    types: [submitted]
+    types: [submitted, dismissed]
+  # NOTE: no `pull_request_review_thread` trigger. GitHub rejects it at parse
+  # time ("Unexpected value 'pull_request_review_thread'"), which turns the
+  # whole workflow into a failed push-run and disables every other trigger.
+  # Resolving a finding therefore releases the merge on the next */10 sweep.
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
   checks: read
 
-# One merge attempt per SHA at a time. Concurrent triggers for the same SHA
-# queue; once the first merges the PR, the rest find no open PR and exit clean.
 concurrency:
-  group: auto-merge-${{ github.repository }}-${{ github.event.check_suite.head_sha || github.event.pull_request.head.sha }}
+  group: auto-merge-${{ github.repository }}-${{ github.event_name }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.number || 'sweep' }}
   cancel-in-progress: false
 
 jobs:
   auto-merge:
-    # Skip check_suite events that are not associated with any PR (e.g. direct
-    # pushes to the default branch) — avoids unnecessary API work.
-    if: |
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
       github.event_name == 'pull_request_review' ||
-      github.event.check_suite.pull_requests[0] != null
+      github.event.workflow_run.pull_requests[0] != null
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate and merge
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer the org PAT. A merge performed with GITHUB_TOKEN does not
+          # create workflow runs for the events it causes, so the canonical
+          # `pull_request: closed` workflows (sentry-release, dashboard-sync)
+          # silently never fire for an auto-merged PR. A PAT-driven merge does
+          # fire them. Falls back to GITHUB_TOKEN if the org secret is not
+          # visible to this repo; the gates behave identically either way.
+          GH_TOKEN: ${{ secrets.AAA_ORG_TOKEN || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          WR_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PRR_PR: ${{ github.event.pull_request.number }}
+          # Reviewers that must weigh in before a merge, comma-separated GitHub
+          # logins exactly as they appear in the reviews API.
+          REQUIRED_REVIEWERS: "chatgpt-codex-connector[bot]"
         run: |
           set -euo pipefail
 
-          # ── Resolve SHA and PR number ────────────────────────────────────
-          if [ "${{ github.event_name }}" = "check_suite" ]; then
-            SHA="${{ github.event.check_suite.head_sha }}"
-            # Use the payload's pull_requests array: it contains only same-repo PRs
-            # (GitHub excludes fork PRs from check_suite.pull_requests), so no fork
-            # guard is needed here and no extra API call is required.
-            PR_NUMBER="${{ github.event.check_suite.pull_requests[0].number }}"
-          else
-            # pull_request_review: skip PRs from forks — GITHUB_TOKEN is read-only there.
-            if [ "${{ github.event.pull_request.head.repo.full_name }}" != "$REPO" ]; then
-              echo "Fork PR — skipping."
-              exit 0
+          # Revoke a queued native auto-merge and verify the revocation stuck.
+          # `gh pr merge --disable-auto` can fail transiently; swallowing that
+          # would leave GitHub free to merge the PR the moment its outstanding
+          # requirement clears, bypassing every gate below. So: check, revoke,
+          # re-check, and shout if it is still armed.
+          revoke_auto_merge() {
+            local pr="$1" armed
+            armed=$(gh pr view "$pr" --repo "$REPO" --json autoMergeRequest \
+                    --jq '.autoMergeRequest != null' 2>/dev/null || echo unknown)
+            [ "$armed" = "false" ] && return 0
+            gh pr merge "$pr" --disable-auto --repo "$REPO" >/dev/null 2>&1 || true
+            armed=$(gh pr view "$pr" --repo "$REPO" --json autoMergeRequest \
+                    --jq '.autoMergeRequest != null' 2>/dev/null || echo unknown)
+            if [ "$armed" != "false" ]; then
+              echo "::error::Could not revoke queued auto-merge on #$pr - it may merge despite these gates."
+              return 1
             fi
-            SHA="${{ github.event.pull_request.head.sha }}"
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          fi
+            echo "::notice::Revoked queued auto-merge on #$pr; this workflow decides when it merges."
+            return 0
+          }
 
-          if [ -z "$PR_NUMBER" ]; then
-            echo "No open PR found for SHA $SHA — nothing to merge."
+          case "$EVENT" in
+            pull_request_review|pull_request_review_thread) PR_LIST="$PRR_PR" ;;
+            workflow_run)        PR_LIST="$WR_PR" ;;
+            # --limit is REQUIRED: `gh pr list` defaults to 30, so without it a
+            # repo with more open PRs silently drops the older ones from the
+            # sweep - they would never be re-evaluated, and never have a stale
+            # queued auto-merge revoked.
+            *)                   PR_LIST=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+                                   --json number --jq '.[].number' | tr '\n' ' ') ;;
+          esac
+
+          if [ -z "${PR_LIST// /}" ]; then
+            echo "No PRs to evaluate for $EVENT."
             exit 0
           fi
-          echo "PR #$PR_NUMBER  HEAD $SHA"
+          echo "Evaluating PR(s): $PR_LIST  (via $EVENT)"
 
-          # ── Gate: at least one check-run, all completed, none failed ──────
-          # Paginate: repos with many workflows can exceed 100 check-runs per SHA.
-          # --jq emits a bare stream of objects; jq -s slurps into a single array.
-          CHECK_RUNS=$(gh api "/repos/$REPO/commits/$SHA/check-runs" --paginate \
-            --jq '.check_runs[]' | jq -s '.')
+          for PR_NUMBER in $PR_LIST; do
+            echo "──────────── PR #$PR_NUMBER ────────────"
 
-          TOTAL=$(echo "$CHECK_RUNS"   | jq 'length')
-          PENDING=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
-          FAILED=$(echo "$CHECK_RUNS"  | jq '[.[] | select(
-            .conclusion == "failure" or
-            .conclusion == "timed_out" or
-            .conclusion == "cancelled" or
-            .conclusion == "action_required"
-          )] | length')
+            PR=$(gh api "/repos/$REPO/pulls/$PR_NUMBER")
+            SHA=$(echo "$PR"    | jq -r '.head.sha')
+            STATE=$(echo "$PR"  | jq -r '.state')
+            DRAFT=$(echo "$PR"  | jq -r '.draft')
+            PENDING_REVIEWERS=$(echo "$PR" | jq '([.requested_reviewers[]?.login] + [.requested_teams[]?.slug]) | length')
 
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "No check-runs found for $SHA — not merging (no CI evidence)."
-            exit 0
-          fi
-          if [ "$PENDING" -gt 0 ]; then
-            echo "$PENDING check(s) still pending — not merging yet."
-            exit 0
-          fi
-          if [ "$FAILED" -gt 0 ]; then
-            echo "$FAILED check(s) failed — not merging."
-            exit 0
-          fi
+            if [ -z "$SHA" ] || [ "$SHA" = "null" ]; then
+              echo "::error::Could not resolve HEAD SHA for #$PR_NUMBER — skipping."
+              continue
+            fi
+            [ "$STATE" != "open" ] && { echo "state=$STATE — skip."; continue; }
+            [ "$DRAFT" = "true" ]  && { echo "draft — skip."; continue; }
 
-          # ── All checks green — attempt merge ──────────────────────────────
-          echo "All checks green. Merging PR #$PR_NUMBER..."
+            # Before ANY gate. Every exit below - checks pending, checks failed,
+            # missing review, unresolved findings, unreadable gate - must not
+            # leave a queued native merge armed behind it.
+            revoke_auto_merge "$PR_NUMBER" || continue
 
-          # Try normal merge first; fall back to --auto if ruleset is still
-          # BLOCKED (e.g. the CodeRabbit check hasn't flipped green yet).
-          if gh pr merge "$PR_NUMBER" --squash --delete-branch --repo "$REPO" 2>&1; then
-            echo "Merged via squash."
-            exit 0
-          fi
+            # ── Gate 1: check-runs on the current head ──────────────────────
+            CHECKS=$(gh api "/repos/$REPO/commits/$SHA/check-runs" --paginate --jq '.check_runs[]' | jq -s '.')
+            TOTAL=$(echo "$CHECKS"   | jq 'length')
+            PENDING=$(echo "$CHECKS" | jq '[.[] | select(.status != "completed")] | length')
+            FAILED=$(echo "$CHECKS"  | jq '[.[] | select(
+              .conclusion == "failure" or .conclusion == "timed_out" or
+              .conclusion == "cancelled" or .conclusion == "action_required"
+            )] | length')
 
-          if gh pr merge "$PR_NUMBER" --auto --squash --delete-branch --repo "$REPO" 2>&1; then
-            echo "Queued for auto-merge."
-            exit 0
-          fi
+            [ "$TOTAL" -eq 0 ]   && { echo "no check-runs — skip."; continue; }
+            [ "$PENDING" -gt 0 ] && { echo "$PENDING check(s) pending — skip."; continue; }
+            [ "$FAILED" -gt 0 ]  && { echo "$FAILED check(s) failed — skip."; continue; }
+            echo "Gate 1 OK: $TOTAL check-run(s) green."
 
-          echo "::warning::Both merge attempts failed for PR #$PR_NUMBER. Manual merge may be needed."
-          exit 0
+            # ── Gate 2: required reviews (hard hold) ─────────────────────────────────
+            # Reviews of ANY commit count. Requiring the current HEAD SHA
+            # deadlocks, because Codex does not review on push (see #78).
+            REVIEWS=$(gh api "/repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate --jq '.[]' | jq -s '.')
+
+            # Only each reviewer's LATEST decision counts. The reviews API keeps
+            # every submission, so a CHANGES_REQUESTED that the same reviewer
+            # later superseded with APPROVED would otherwise block forever.
+            # COMMENTED reviews carry no decision and are skipped when reducing.
+            CHANGES_REQUESTED=$(echo "$REVIEWS" | jq '
+              [.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")]
+              | sort_by(.submitted_at)
+              | group_by(.user.login)
+              | map(last)
+              | map(select(.state == "CHANGES_REQUESTED"))
+              | length')
+            if [ "$CHANGES_REQUESTED" -gt 0 ]; then
+              echo "changes requested (latest decision of $CHANGES_REQUESTED reviewer(s)) — not merging."
+              continue
+            fi
+
+            # Fail CLOSED on counting: demand positive confirmation of the full
+            # set, never merge because a "missing" string happened to be empty.
+            WANTED=0; MATCHED=0; MISSING=""
+            while IFS= read -r R; do
+              R="$(echo "$R" | xargs)"; [ -z "$R" ] && continue
+              WANTED=$((WANTED + 1))
+              SEEN=$(echo "$REVIEWS" | jq --arg r "$R" '[.[] | select(.user.login == $r)] | length')
+              if [ "$SEEN" -gt 0 ]; then MATCHED=$((MATCHED + 1)); else MISSING="$MISSING $R"; fi
+            done < <(echo "$REQUIRED_REVIEWERS" | tr ',' '\n')
+
+            if [ "$WANTED" -eq 0 ]; then
+              echo "::error::REQUIRED_REVIEWERS is empty — refusing to merge unreviewed."
+              continue
+            fi
+
+            # HOLD, never expire. See the header for why there is no grace
+            # period: on a repo without the required reviewer this holds every
+            # PR, which is the intended opt-in switch, not a defect.
+            if [ "$PENDING_REVIEWERS" -gt 0 ]; then
+              echo "::notice::PR #$PR_NUMBER held — $PENDING_REVIEWERS requested reviewer(s)/team(s) still pending."
+              continue
+            fi
+            if [ "$MATCHED" -ne "$WANTED" ]; then
+              echo "::notice::PR #$PR_NUMBER held — required review(s) not yet submitted:$MISSING"
+              continue
+            fi
+            echo "Gate 2 OK: $MATCHED/$WANTED required reviewer(s) have reviewed."
+
+            # ── Gate 3: unresolved review findings ──────────────────────────
+            # Gate 2 only proves a review was submitted. This reads what it
+            # said. Outdated threads are excluded deliberately: a follow-up
+            # commit that rewrites the lines a finding points at clears it,
+            # which is what keeps this from deadlocking on push (cf. #78).
+            # Threads are paged 100 at a time and NEVER leave the list — a
+            # resolved thread stays in it — so a PR that ever crosses 100
+            # threads must be walked page by page. Refusing on hasNextPage
+            # would make such a PR unmergeable forever.
+            THREADS="[]"; AFTER=""; PAGE=0; THREADS_OK=true
+            while :; do
+              PAGE=$((PAGE + 1))
+              if [ "$PAGE" -gt 50 ]; then
+                echo "::error::PR #$PR_NUMBER has over 5000 review threads (50 pages) — refusing to merge."
+                THREADS_OK=false; break
+              fi
+              if [ -n "$AFTER" ]; then AFTER_ARG=(-f after="$AFTER"); else AFTER_ARG=(-F after=null); fi
+              PAGE_JSON=$(gh api graphql \
+                -f owner="${REPO%/*}" -f name="${REPO#*/}" -F number="$PR_NUMBER" "${AFTER_ARG[@]}" \
+                -f query='query($owner:String!,$name:String!,$number:Int!,$after:String){
+                  repository(owner:$owner,name:$name){
+                    pullRequest(number:$number){
+                      reviewThreads(first:100, after:$after){
+                        pageInfo{ hasNextPage endCursor }
+                        nodes{ isResolved isOutdated
+                          comments(first:1){ nodes{ author{ login } path } } } } } } }' \
+                --jq '.data.repository.pullRequest.reviewThreads
+                      | {more: .pageInfo.hasNextPage, cursor: .pageInfo.endCursor,
+                         open: [.nodes[] | select(.isResolved == false and .isOutdated == false)]}' 2>/dev/null) || PAGE_JSON=""
+
+              # Fail CLOSED on every page: an unreadable answer is not an
+              # empty one, and `.more` must be a real boolean — a missing
+              # field must read as "cannot tell", never as "no more pages".
+              if [ -z "$PAGE_JSON" ] \
+                 || ! echo "$PAGE_JSON" | jq -e '(.open | type == "array") and (.more | type == "boolean")' >/dev/null 2>&1; then
+                echo "::error::Could not read review threads (page $PAGE) for #$PR_NUMBER — refusing to merge."
+                THREADS_OK=false; break
+              fi
+              THREADS=$(jq -n --argjson a "$THREADS" --argjson b "$(echo "$PAGE_JSON" | jq '.open')" '$a + $b')
+              [ "$(echo "$PAGE_JSON" | jq -r '.more')" = "true" ] || break
+              AFTER=$(echo "$PAGE_JSON" | jq -r '.cursor // empty')
+              if [ -z "$AFTER" ]; then
+                echo "::error::Review threads for #$PR_NUMBER report another page but no cursor — refusing to merge."
+                THREADS_OK=false; break
+              fi
+            done
+            [ "$THREADS_OK" = "true" ] || continue
+
+            UNRESOLVED=$(echo "$THREADS" | jq 'length')
+            if [ "$UNRESOLVED" -gt 0 ]; then
+              echo "$THREADS" | jq -r '.[] | "  - \(.comments.nodes[0].path // "?") (\(.comments.nodes[0].author.login // "?"))"'
+              echo "::warning::PR #$PR_NUMBER NOT merged — $UNRESOLVED unresolved review finding(s). Address them, or resolve the thread(s) to release the merge."
+              continue
+            fi
+            echo "Gate 3 OK: no unresolved review findings."
+
+            echo "Merging PR #$PR_NUMBER..."
+            gh pr merge "$PR_NUMBER" --squash --match-head-commit "$SHA" --delete-branch --repo "$REPO" && continue
+            # Deliberately NO `--auto` fallback. Queuing native auto-merge hands
+            # the decision to GitHub, which merges once the blocking requirement
+            # clears WITHOUT re-running anything here - Gates 1-3 and the head
+            # pin are all bypassed. The */10 sweep retries instead, re-evaluating
+            # every gate against the head as it is at that moment. A blocked PR
+            # waits; it does not slip through.
+            echo "::notice::PR #$PR_NUMBER not mergeable yet - leaving it for the next sweep."
+          done
