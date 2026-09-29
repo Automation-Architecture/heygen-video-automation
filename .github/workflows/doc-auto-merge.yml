@@ -1,0 +1,444 @@
+name: Doc auto-merge
+
+# CANONICAL COPY (Automation-Architecture/.github). Edit here, never in a repo.
+#
+# Merges a documentation-only pull request once CI is green, with NO review
+# (Brad, 2026-09-28). Code PRs are never touched: they need Codex's clean pass
+# and a person who merges deliberately.
+#
+# ── What qualifies ─────────────────────────────────────────────────────────
+# EVERY changed file, and the previous name of every renamed file, ends in
+# .md or .markdown (case-sensitive, any path; NOT .mdx, which carries JSX
+# and is reviewed like code, Brad 2026-09-29; CLAUDE.md, AGENTS.md and
+# other instruction files included by decision). Same rule, same pattern, as
+# review-verdict.yml's evidence 0. Keep the two in step. Also required:
+#   - not a draft (a draft never merges; `ready_for_review` re-evaluates);
+#   - no `no-auto-merge` label (the hold: add it and nothing here merges);
+#   - the branch is in this repository (a fork's PR never auto-merges);
+#   - the file list is read in full and holds exactly `changed_files`
+#     entries, fewer than 3000. Unreadable, short or oversized refuses.
+#
+# ── What "CI is green" means ───────────────────────────────────────────────
+# On the head commit, taking the newest run of each (app, check name):
+#   - every check required for the base branch (ruleset or classic branch
+#     protection) is present and passed (success, neutral or skipped, which
+#     is what GitHub itself accepts), from the pinned app if one is pinned;
+#   - no other check-run is still running or waiting (action_required, which
+#     is what review/verdict shows until its re-run after ready_for_review or
+#     an unlabel lands), none concluded failure, timed_out, startup_failure or
+#     stale, and no commit status is pending, failure or error.
+# A `cancelled` newest run is a failure (it validated nothing; Codex on the
+# wave-1 rollout), EXCEPT a cancelled job of review-verdict.yml or of this
+# file: those are superseded by a concurrency group on every PR (review-
+# verdict's `publish`), and their real output is the `review/verdict` check.
+# Which workflow a cancelled Actions job belongs to is read from its run
+# (details_url -> actions/runs/<id> -> path), never guessed from its name.
+# Not counted: this job's own check, and the reviewer checks in
+# IGNORED_CHECKS (Greptile is a reviewer, not CI, and no review is required).
+# In a ruleset repo, `review/verdict` is required, and review-verdict.yml
+# passes a documentation-only PR under the same rule this file applies.
+#
+# ── Timing: event-driven, with one bounded wait ───────────────────────────
+# pull_request_target starts the run for every PR event (no `paths`
+# filter; a code PR is refused, and any armed auto-merge disarmed, before the
+# settle, within seconds). A qualifying PR then waits SETTLE_SECONDS for CI to
+# register its checks, and re-reads them every POLL_SECONDS up to
+# WAIT_SECONDS. A CI run completing (workflow_run, the org's two CI workflow
+# names, same as auto-merge.yml) re-evaluates EVERY PR it names at its head
+# commit, each independently and in parallel, and so does a manual dispatch
+# (one PR). One run per PR and commit for PR events: a newer event for the
+# same commit cancels the older run, and every run re-evaluates from scratch. A run evaluates ONLY the commit its
+# event is about (HEAD_HINT); if the PR has moved on it stops, and the
+# synchronize run for the new head, which settles first, decides.
+# CI that outlasts WAIT_SECONDS and is not named "CI" or "PR Autopilot"
+# leaves the PR open with a warning; `gh workflow run doc-auto-merge.yml
+# -R <repo> -f pr_number=<n>` finishes it.
+#
+# ── The merge ──────────────────────────────────────────────────────────────
+# Immediately before merging, the PR is read once more (state, draft, hold
+# label, head, base, file list) and must still match what was checked. The
+# merge call pins the head (`sha`), so a push that lands in between makes
+# GitHub refuse it. Squash only, never an admin bypass: GitHub still applies
+# every ruleset and protection rule at merge time. The result is re-read and
+# a merge GitHub did not record is a red run, never a silent one.
+# Residual (accepted): a hold label or a retarget that lands inside the final
+# read-then-merge round trip (about a second) is not seen. The merge API has
+# no expected-base or expected-labels parameter.
+#
+# MERGE_TOKEN prefers the org PAT (AAA_ORG_TOKEN, 1Password vault aaa-APIs,
+# item aaa-org-token) because a merge made with GITHUB_TOKEN starts no
+# workflows, so `pull_request: closed` jobs (dashboard-sync, sentry-release)
+# and push-to-main deploys would silently skip doc merges. Everything else
+# reads with GITHUB_TOKEN.
+#
+# pull_request_target runs this file from the DEFAULT BRANCH, with a write
+# token, on any PR. Safe because nothing here checks out or runs PR code: it
+# only reads the API and calls the merge endpoint. Do not add a checkout.
+#
+# Observability: every run ends with one line starting `doc-auto-merge #<n>:`
+# saying what it decided. A merge failure is ::error and a red run; a CI wait
+# that timed out is ::warning.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled, auto_merge_enabled]
+    # NO `paths` filter: arming GitHub native auto-merge on ANY PR, including
+    # a code PR with no Markdown file, must be evaluated at once so a held or
+    # non-documentation PR has it disarmed (Brad, 2026-09-29). A filter would
+    # hide exactly those PRs. It cannot be a separate `pull_request` trigger:
+    # that runs the PR's own copy of this file with the org PAT in reach
+    # (Codex P1 on .github#60). A code PR's run exits at the doc-only check
+    # within seconds.
+  workflow_run:
+    workflows: ["CI", "PR Autopilot"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to evaluate (and merge if it qualifies)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+  # Reading which workflow a cancelled Actions job belongs to
+  # (GET actions/runs/<id>) needs Actions read.
+  actions: read
+
+concurrency:
+  # One run per PR HEAD COMMIT; the newest event for that commit wins and
+  # re-evaluates from scratch. Keyed on the commit the event is about, never
+  # the PR number: a CI completion for an older commit must not cancel the
+  # run waiting on the new head's CI (Codex P1 on .github#54). Such a run
+  # refuses on its own (HEAD_HINT). A dispatch is keyed by PR number; a
+  # workflow_run with no PR (a push to main) gets a throwaway group.
+  # Keyed on PR number AND head SHA: two open PRs at one commit must not
+  # cancel each other (Codex on the wave-1 rollout PRs).
+  # A CI completion (workflow_run) can name several PRs; one run evaluates
+  # every one of them in parallel, so its group is unique to the run and it
+  # never cancels, or is cancelled by, a PR's own run. If both reach the
+  # merge, the loser reads the PR as merged and reports it, not an error.
+  group: doc-auto-merge-${{ github.repository }}-${{ (github.event.pull_request && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha)) || (github.event.workflow_run && format('run-{0}-{1}', github.event.workflow_run.head_sha, github.run_id)) || (github.event.inputs.pr_number && format('pr-{0}', github.event.inputs.pr_number)) || format('none-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  doc-auto-merge:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # No checkout. Keep it that way (see the header).
+      - name: Merge a green documentation-only PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_TOKEN: ${{ secrets.AAA_ORG_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || '' }}
+          # workflow_run: EVERY PR the completed run names. Each whose head is
+          # the run's head commit and whose base is this repository is
+          # evaluated independently (Brad, 2026-09-29).
+          PRS_JSON: ${{ github.event_name == 'workflow_run' && toJSON(github.event.workflow_run.pull_requests) || '' }}
+          # The commit this event is about. A run evaluates only that commit;
+          # if the PR has moved on, the run for the new head decides.
+          HEAD_HINT: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || '' }}
+          # This job's check-run name; it never waits on itself.
+          JOB_NAME: doc-auto-merge
+          # Same values as review-verdict.yml's evidence 0. Keep in step.
+          DOC_ONLY_PATTERN: '\.(md|markdown)\z'
+          HOLD_LABEL: "no-auto-merge"
+          # app-slug/check-name, comma-separated: reviewers, not CI.
+          IGNORED_CHECKS: "greptile-apps/Greptile Review"
+          # workflow_run needs no settle: its commit's CI has just finished.
+          # auto_merge_enabled disarms (if it must) before any settle.
+          SETTLE_SECONDS: ${{ github.event_name == 'workflow_run' && '0' || '60' }}
+          WAIT_SECONDS: "1200"
+          POLL_SECONDS: "20"
+        run: |
+          set -euo pipefail
+          REPO="${REPO:?REPO is required}"
+          PR_NUMBER="${PR_NUMBER:-}"
+          DOC_ONLY_PATTERN="${DOC_ONLY_PATTERN:-\.(md|markdown)\z}"
+          HOLD_LABEL="${HOLD_LABEL:-no-auto-merge}"
+          JOB_NAME="${JOB_NAME:-doc-auto-merge}"
+          IGNORED_CHECKS="${IGNORED_CHECKS:-}"
+          SETTLE_SECONDS="${SETTLE_SECONDS:-0}"
+          WAIT_SECONDS="${WAIT_SECONDS:-1200}"
+          POLL_SECONDS="${POLL_SECONDS:-20}"
+          MERGE_TOKEN="${MERGE_TOKEN:-${GH_TOKEN:-}}"
+          HEAD_HINT="${HEAD_HINT:-}"
+          PRS_JSON="${PRS_JSON:-}"
+          PR_CUR=""
+
+          say() { echo "doc-auto-merge #${PR_NUMBER}: $*"; }
+          # Not merging, by design: exit 0 with the reason.
+          done_() { say "$*"; exit 0; }
+
+          # GitHub native auto-merge must not stay armed on a PR this workflow
+          # refuses (held, not documentation-only, or not provably so): GitHub
+          # would merge it when its requirements clear, past the hold or past
+          # the deliberate human merge code needs. Disarmed and verified; a
+          # disarm that does not take is a red run.
+          disarm_if_armed() {
+            if [ "$(echo "$PR_CUR" | jq -r 'if .auto_merge == null then "no" else "yes" end')" != "yes" ]; then
+              return 0
+            fi
+            # shellcheck disable=SC2016 # $id is a GraphQL variable
+            gh api graphql -f id="$(echo "$PR_CUR" | jq -r '.node_id')" -f query='
+              mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' >/dev/null || true
+            if [ "$(gh api "/repos/$REPO/pulls/$PR_NUMBER" --jq 'if .auto_merge == null then "no" else "yes" end' || echo yes)" != "no" ]; then
+              echo "::error::#$PR_NUMBER: native auto-merge is armed on a PR this workflow refuses ($1), and it could not be disabled."
+              exit 1
+            fi
+            say "native auto-merge was armed; disabled it ($1)."
+            PR_CUR=$(echo "$PR_CUR" | jq '.auto_merge = null')
+          }
+          # Refuse this PR: disarm any native auto-merge, then stop.
+          refuse() { disarm_if_armed "$1"; done_ "$1"; }
+
+          # Reads the PR and decides whether it qualifies. Exits the script
+          # (0, with the reason) when it does not. Sets HEAD, BASE_REF,
+          # FILE_COUNT.
+          qualify() {
+            local pr changed files verdict
+            if ! pr=$(gh api "/repos/$REPO/pulls/$PR_NUMBER"); then
+              echo "::error::Could not read #$PR_NUMBER."
+              exit 1
+            fi
+            PR_CUR="$pr"
+            if [ "$(echo "$pr" | jq -r '.merged // false')" = "true" ]; then
+              done_ "already merged."
+            fi
+            if [ "$(echo "$pr" | jq -r '.state // empty')" != "open" ]; then
+              done_ "not open; nothing to do."
+            fi
+            if [ "$(echo "$pr" | jq -r 'if .draft == false then "no" else "yes" end')" != "no" ]; then
+              done_ "draft; drafts never auto-merge."
+            fi
+            # Native auto-merge is never left armed, on any PR: code needs a
+            # deliberate human merge, and a documentation-only PR is merged by
+            # this workflow, whose CI gate (every visible check green) is
+            # stricter than the required checks GitHub waits for (Codex on
+            # the #60 re-sync PRs).
+            disarm_if_armed "this workflow merges documentation-only PRs itself, and code is merged by a person"
+            case "$(echo "$pr" | jq -r --arg l "$HOLD_LABEL" '
+                if (.labels | type) != "array" then "unreadable"
+                elif any(.labels[]; .name == $l) then "yes" else "no" end')" in
+              no) ;;
+              yes) refuse "held by the ${HOLD_LABEL} label; a person merges it" ;;
+              *) refuse "labels unreadable, so the hold cannot be ruled out; not merging" ;;
+            esac
+            if [ "$(echo "$pr" | jq -r '.head.repo.full_name // empty')" != "$REPO" ]; then
+              refuse "branch is not in ${REPO} (a fork, or deleted); forks never auto-merge"
+            fi
+            HEAD=$(echo "$pr" | jq -r '.head.sha // empty')
+            BASE_REF=$(echo "$pr" | jq -r '.base.ref // empty')
+            if ! [[ "$HEAD" =~ ^[0-9a-f]{40}$ ]] || [ -z "$BASE_REF" ]; then
+              echo "::error::#$PR_NUMBER has no readable head SHA or base ref."
+              exit 1
+            fi
+            if [ -n "$HEAD_HINT" ] && [ "$HEAD" != "$HEAD_HINT" ]; then
+              done_ "this run is for ${HEAD_HINT:0:7}, but the head is now ${HEAD:0:7}; the run for the new head decides."
+            fi
+            # A dispatch has no hint: pin the head it first read.
+            HEAD_HINT="$HEAD"
+            changed=$(echo "$pr" | jq -r '.changed_files // empty')
+            if ! [[ "$changed" =~ ^[0-9]+$ ]] || [ "$changed" -eq 0 ] || [ "$changed" -ge 3000 ]; then
+              refuse "changed_files is '${changed}', not 1-2999, so the diff cannot be shown to be all Markdown; not merging"
+            fi
+            # The endpoint stops at 3000 files and --paginate reports a
+            # truncated list as complete, hence the count comparison.
+            if ! files=$(gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" | jq -s 'add // []'); then
+              refuse "could not read the changed files; not merging"
+            fi
+            if ! verdict=$(echo "$files" | jq -r --argjson n "$changed" --arg pat "$DOC_ONLY_PATTERN" '
+                if type != "array" then "the changed-file list is not a list"
+                elif length != $n then "the changed-file list holds \(length) of \($n) files"
+                elif any(.[]; (.filename | type) != "string" or .filename == "") then "a changed file has no name"
+                else
+                  [.[] | .filename, (.previous_filename // empty)]
+                  | map(select(type != "string" or (test($pat) | not)))
+                  | if length == 0 then "doc"
+                    else "\(length) changed path(s) are not Markdown, e.g. \(.[0] | tostring | .[0:120])" end
+                end'); then
+              refuse "could not classify the changed files; not merging"
+            fi
+            if [ "$verdict" != "doc" ]; then
+              refuse "not documentation-only (${verdict}); code PRs are never auto-merged"
+            fi
+            FILE_COUNT="$changed"
+          }
+
+          # Prints green, pending:<why> or red:<why> for HEAD. Never exits the
+          # script; an unreadable API is pending, never green.
+          checks_state() {
+            local runs statuses rules branch base_enc cancelled self_ids id url run_id path
+            # A branch name with "/" must be URL-encoded as one path segment
+            # (GitHub REST docs, "Get a branch").
+            base_enc=$(jq -rn --arg b "$BASE_REF" '$b | @uri')
+            if ! runs=$(gh api --paginate "/repos/$REPO/commits/$HEAD/check-runs?per_page=100" --jq '.check_runs[]' | jq -s '.'); then
+              echo "pending:could not read check-runs"; return 0
+            fi
+            # Newest cancelled Actions jobs: which of them belong to
+            # review-verdict.yml or this file (superseded, not a CI result)?
+            self_ids="[]"
+            cancelled=$(echo "$runs" | jq -r --arg job "$JOB_NAME" '
+              group_by([(.app.slug // ""), .name]) | map(max_by(.id))[]
+              | select((.app.slug // "") == "github-actions" and .conclusion == "cancelled" and .name != $job)
+              | "\(.id) \(.details_url // "")"')
+            while read -r id url; do
+              [ -n "$id" ] || continue
+              run_id=$(printf '%s' "$url" | sed -nE 's#.*/actions/runs/([0-9]+).*#\1#p')
+              if [ -z "$run_id" ] || ! path=$(gh api "/repos/$REPO/actions/runs/$run_id" --jq '.path // empty'); then
+                echo "pending:could not tell which workflow cancelled check ${id} belongs to"; return 0
+              fi
+              case "${path%%@*}" in
+                .github/workflows/review-verdict.yml|.github/workflows/doc-auto-merge.yml)
+                  self_ids=$(echo "$self_ids" | jq --argjson i "$id" '. + [$i]') ;;
+              esac
+            done <<< "$cancelled"
+            if ! statuses=$(gh api --paginate "/repos/$REPO/commits/$HEAD/status?per_page=100" --jq '.statuses[]' | jq -s '.'); then
+              echo "pending:could not read commit statuses"; return 0
+            fi
+            if ! rules=$(gh api "/repos/$REPO/rules/branches/$base_enc"); then
+              echo "pending:could not read the rules on ${BASE_REF}"; return 0
+            fi
+            if ! branch=$(gh api "/repos/$REPO/branches/$base_enc"); then
+              echo "pending:could not read branch ${BASE_REF}"; return 0
+            fi
+            jq -rn --argjson runs "$runs" --argjson st "$statuses" --argjson rules "$rules" \
+                --argjson branch "$branch" --arg job "$JOB_NAME" --arg ign "$IGNORED_CHECKS" \
+                --argjson selfids "$self_ids" '
+              def ok: IN("success", "neutral", "skipped");
+              def newest: group_by([(.app.slug // ""), .name]) | map(max_by(.id));
+              ($ign | split(",") | map(sub("^\\s+"; "") | sub("\\s+$"; "")) | map(select(length > 0))) as $ignored
+              | ($runs | newest) as $all
+              # Newest status per context, like check-runs: a retried context
+              # must not stay red or pending on its older entry.
+              | ($st | group_by(.context) | map(max_by([(.updated_at // ""), (.id // 0)]))) as $st
+              | ($all | map(select(
+                    ((.app.slug // "") == "github-actions" and .name == $job | not)
+                    and (.id as $i | $selfids | index($i) | not)
+                    and (((.app.slug // "") + "/" + .name) as $k | $ignored | index($k) | not)))) as $ci
+              | ([$rules[]? | select(.type == "required_status_checks")
+                  | .parameters.required_status_checks[]? | {context, app: .integration_id}]
+                 + [($branch.protection.required_status_checks.checks // [])[] | {context, app: .app_id}]
+                 + [($branch.protection.required_status_checks.contexts // [])[] | {context: ., app: null}]
+                 | unique_by([.context, .app])) as $req
+              | [$req[] | . as $r
+                  | select(
+                      ([$all[] | select(.name == $r.context
+                                        and ($r.app == null or $r.app == -1 or .app.id == $r.app)
+                                        and .status == "completed" and (.conclusion | ok))] | length) == 0
+                      and ([$st[] | select(.context == $r.context and .state == "success"
+                                           and ($r.app == null or $r.app == -1))] | length) == 0)
+                  | $r.context] as $missing
+              | ([$ci[] | select(.status == "completed"
+                    and (.conclusion | IN("failure", "timed_out", "startup_failure", "stale", "cancelled")))
+                  | "\(.name) (\(.conclusion))"]
+                + [$st[] | select(.state == "failure" or .state == "error") | "\(.context) (\(.state))"]) as $red
+              | ([$ci[] | select(.status != "completed" or .conclusion == "action_required") | .name]
+                + [$st[] | select(.state == "pending") | .context]) as $running
+              | if ($red | length) > 0 then "red:" + ($red | join(", "))
+                elif ($running | length) > 0 then "pending:still running or waiting: " + ($running | unique | join(", "))
+                elif ($missing | length) > 0 then "pending:required check(s) not passed yet: " + ($missing | unique | join(", "))
+                else "green" end' || echo "pending:could not evaluate the checks"
+          }
+
+          # Evaluate one PR end to end (qualify, wait for CI, final snapshot,
+          # merge). Always run in a subshell: done_/refuse/exit end only this
+          # PR's evaluation.
+          evaluate_pr() {
+            qualify
+            say "documentation-only (${FILE_COUNT} files) at ${HEAD:0:7} into ${BASE_REF}; waiting for CI."
+            if [ "$SETTLE_SECONDS" -gt 0 ]; then
+              # Let CI register its check-runs before the first look.
+              sleep "$SETTLE_SECONDS"
+              qualify
+            fi
+            deadline=$((SECONDS + WAIT_SECONDS))
+            while true; do
+              state=$(checks_state)
+              case "$state" in
+                green) break ;;
+                red:*)
+                  refuse "CI is not green on ${HEAD:0:7}: ${state#red:}. Not merging; a push, or a CI re-run that completes, re-evaluates" ;;
+              esac
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::warning::#$PR_NUMBER is documentation-only but CI did not settle within ${WAIT_SECONDS}s (${state#pending:}). Re-run: gh workflow run doc-auto-merge.yml -R $REPO -f pr_number=$PR_NUMBER"
+                refuse "gave up waiting: ${state#pending:}"
+              fi
+              say "${state#pending:}; checking again in ${POLL_SECONDS}s."
+              sleep "$POLL_SECONDS"
+              qualify
+            done
+
+            # Final snapshot, immediately before the merge: PR metadata and files
+            # again, and CI again (a re-run can turn a check pending or red after
+            # the loop saw green).
+            locked_base="$BASE_REF"
+            qualify
+            if [ "$BASE_REF" != "$locked_base" ]; then
+              done_ "base moved while checking; the run for the new state decides."
+            fi
+            state=$(checks_state)
+            if [ "$state" != "green" ]; then
+              refuse "CI changed in the final snapshot (${state#*:}); not merging. A later CI completion re-evaluates"
+            fi
+
+            say "CI green on ${HEAD:0:7}; squash-merging."
+            if ! GH_TOKEN="$MERGE_TOKEN" gh api -X PUT "/repos/$REPO/pulls/$PR_NUMBER/merge" \
+                  -f merge_method=squash -f sha="$HEAD" >/dev/null; then
+              # Another run for this PR (a PR event and a CI completion) may have
+              # merged it first.
+              if [ "$(gh api "/repos/$REPO/pulls/$PR_NUMBER" --jq '.merged' || echo false)" = "true" ]; then
+                done_ "merged by another run of this workflow."
+              fi
+              echo "::error::GitHub refused to merge documentation-only #$PR_NUMBER at ${HEAD:0:7} (a ruleset, a push that moved the head, or a conflict). Nothing was merged."
+              exit 1
+            fi
+            merged=$(gh api "/repos/$REPO/pulls/$PR_NUMBER" --jq '"\(.merged) \(.merge_commit_sha // "")"' || echo "unknown")
+            if [ "${merged%% *}" != "true" ]; then
+              echo "::error::The merge call for #$PR_NUMBER returned success but the PR reads as not merged (${merged})."
+              exit 1
+            fi
+            # The head branch is left to the repo's "delete branch on merge"
+            # setting: deleting the ref here would close any PR stacked on it,
+            # where GitHub's own deletion retargets them.
+            say "merged as ${merged#* } (documentation-only, CI green, no review required by policy)."
+          }
+
+          # Which PRs this event is about. A CI completion names every PR at
+          # its head commit; each is evaluated independently and in parallel,
+          # so one held, refused or failing PR never stops another.
+          targets=()
+          if [ -n "$PRS_JSON" ]; then
+            if ! mapfile -t targets < <(echo "$PRS_JSON" | jq -r --arg sha "$HEAD_HINT" --arg repo "$REPO" '
+                .[]? | select(.head.sha == $sha and ((.base.repo.url // "") | endswith("/repos/" + $repo)))
+                | .number | tostring'); then
+              echo "::error::Could not read the PRs this CI run names."
+              exit 1
+            fi
+          elif [ -n "$PR_NUMBER" ]; then
+            targets=("$PR_NUMBER")
+          fi
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "doc-auto-merge: no PR in ${REPO} has head ${HEAD_HINT:0:7}; nothing to do."
+            exit 0
+          fi
+          pids=()
+          for n in "${targets[@]}"; do
+            if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+              echo "::error::Not a PR number: '${n}'."
+              exit 1
+            fi
+            ( PR_NUMBER="$n"; evaluate_pr ) &
+            pids+=("$!")
+          done
+          failed=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || failed=1
+          done
+          exit "$failed"
