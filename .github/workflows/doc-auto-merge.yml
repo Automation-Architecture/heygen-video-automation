@@ -136,7 +136,8 @@ on:
   workflow_run:
     # Every workflow in the org that runs on pull_request/pull_request_target
     # and can hold a check (survey of all 103 repos, 2026-10-01), plus PR
-    # Autopilot. Not this file (it would re-trigger itself) and not the
+    # Autopilot and the canonical Codex auto-request (a check on every PR;
+    # on a Markdown-only PR it exits within seconds). Not this file (it would re-trigger itself) and not the
     # post-merge jobs (dashboard sync, sentry release, portfolio sync). A
     # name with no workflow behind it is harmless. Keep the list exact:
     # GitHub matches names, not patterns.
@@ -147,6 +148,8 @@ on:
       - "Review verdict"
       - "Review verdict evidence tests"
       - "Doc auto-merge tests"
+      - "Codex auto-request"
+      - "Codex auto-request tests"
       - "Python unit tests"
       - "Test archive"
       - "Validate"
