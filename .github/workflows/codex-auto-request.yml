@@ -1,0 +1,177 @@
+name: Codex auto-request
+
+# CANONICAL COPY (Automation-Architecture/.github). Edit here, never in a repo.
+#
+# A NUDGE, not a gate (Brad, 2026-10-01). It comments `@codex review` once on
+# a PR head that Codex has not touched, because Codex's own auto-review skips
+# some PRs: contractor PRs (mac-tuongnh, seanpham99), bot PRs
+# (aaa-dashboard-bot), and everything in aaa-runbooks ("create an environment
+# for this repo"). Whether a review is usable (clean, dismissed, a skip or
+# usage-limit notice, stale after a retarget) is judged ONLY by
+# review-verdict.yml and the org gate, never here. A missed or an extra nudge
+# is acceptable: a missed one leaves the gate red until someone comments
+# `@codex review`; an extra one costs one Codex review.
+#
+# ── Whom Codex obeys ──────────────────────────────────────────────────────
+# Codex runs a request only for a commenter whose GitHub account is linked to
+# ChatGPT. It refuses bots: on aaa-runbooks#165 `@codex review` from
+# claude[bot] got "To use Codex here, create a Codex account and connect to
+# github" within 4 s (2026-09-26 and 2026-09-28), while web3sea's request on
+# the same head ran a review. A GITHUB_TOKEN comment is posted by
+# github-actions[bot], so the nudge is posted with AAA_ORG_TOKEN (classic PAT
+# of web3sea, org-wide repo + workflow scope; 1Password vault aaa-APIs, item
+# aaa-org-token).
+#
+# ── Threat model ──────────────────────────────────────────────────────────
+# - The only trigger is pull_request_target, which runs THIS FILE FROM THE
+#   DEFAULT BRANCH, never the PR's copy. No `pull_request` trigger (it runs
+#   the PR's copy) and no workflow_dispatch (`--ref <branch>` runs a branch's
+#   copy): either would put the PAT in reach of modified code.
+# - Nothing checks out, builds or runs PR content. No PR text (title, body,
+#   branch name, comments) is interpolated into a script; only the PR number
+#   and the head SHA, both validated.
+# - GITHUB_TOKEN is read-only (permissions below). The PAT exists only in the
+#   env of the `nudge` step, whose single API call posts the fixed comment
+#   `@codex review` to this PR. Keep it that way.
+# - Fork PRs are skipped (no outsider can spend the Codex quota). Dependabot
+#   PRs get no Actions secrets on pull_request_target; the run says so.
+# - Residual, not this file's: AAA_ORG_TOKEN is an org secret every repo's
+#   workflows can read, so a writer's own workflow on a branch push already
+#   reaches it. Narrowing that is a secrets change.
+#
+# ── Rule ──────────────────────────────────────────────────────────────────
+# On opened, synchronize, reopened, ready_for_review, and edited when the
+# base changed (a retarget), of a non-draft same-repository PR: wait
+# DELAY_SECONDS (3 minutes) so Codex's own auto-review can start, then post
+# `@codex review` once if ALL hold:
+#   (a) the event's head is still the PR's head (else the newer run decides);
+#   (b) Codex's summary comment has no row of ANY status for this head SHA
+#       and Codex has no review object on it;
+#   (c) nobody commented `@codex review` after this head was pushed.
+# Otherwise it does nothing. No retries, no polling. "After this head was
+# pushed" is the event time for synchronize and the head commit's committer
+# date otherwise. For a retarget, (b) and (c) count only what came after the
+# retarget (the event time), so a retargeted head gets one new nudge. The
+# nudge is itself an `@codex review` after the push, so (c) stops a second
+# one for the same head.
+#
+# Observability: each run ends with one line `codex-auto-request #<n>: ...`.
+# Missing AAA_ORG_TOKEN on a non-Dependabot PR is ::error (a red run).
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  # Per PR AND head, queued, never cancelled: a cancelled run leaves a
+  # `cancelled` check on the head, which doc-auto-merge.yml reads as red. A
+  # second event for the same head waits, then sees the first nudge (c).
+  group: codex-auto-request-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  codex-auto-request:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'edited' || github.event.changes.base != null)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          # synchronize: the push. edited (retarget): the retarget. Else empty.
+          EVENT_AT: ${{ (github.event.action == 'synchronize' || github.event.action == 'edited') && github.event.pull_request.updated_at || '' }}
+          RETARGET: ${{ github.event.action == 'edited' }}
+          CODEX_BOT: "chatgpt-codex-connector[bot]"
+          DELAY_SECONDS: "180"
+        run: |
+          set -euo pipefail
+          OUT="${GITHUB_OUTPUT:-/dev/null}"
+          say() { echo "codex-auto-request #${PR_NUMBER}: $*"; }
+          decide() { say "$2"; echo "nudge=$1" >> "$OUT"; exit 0; }
+          ts='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]] || { echo "::error::bad PR number"; exit 1; }
+          [[ "$EVENT_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad head SHA"; exit 1; }
+          [ -z "${EVENT_AT:-}" ] || [[ "$EVENT_AT" =~ $ts ]] || { echo "::error::bad event time"; exit 1; }
+          if [ "${RETARGET:-false}" = true ] && [ -z "${EVENT_AT:-}" ]; then
+            echo "::error::retarget without an event time"; exit 1
+          fi
+
+          sleep "${DELAY_SECONDS:-180}"
+
+          # (a) still open, still this head.
+          now=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.state + " " + .head.sha')
+          [ "$now" = "open $EVENT_HEAD" ] || decide false "the PR moved on (now: ${now:-unreadable}); nothing to do."
+
+          # Since when (b) and (c) look: the push, or the retarget.
+          since="${EVENT_AT:-}"
+          if [ -z "$since" ]; then
+            since=$(gh api "repos/$REPO/commits/$EVENT_HEAD" --jq '.commit.committer.date')
+            [[ "$since" =~ $ts ]] || { echo "::error::could not read the head commit's date"; exit 1; }
+          fi
+          # Rows and reviews of the head count whenever made, except on a retarget.
+          rows_since=""
+          if [ "${RETARGET:-false}" = true ]; then rows_since="$since"; fi
+
+          comments=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            --jq '.[] | {user: .user.login, at: .created_at, body: (.body // "")}' | jq -s .)
+          reviews=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" \
+            --jq '.[] | {user: .user.login, commit: .commit_id, at: (.submitted_at // "")}' | jq -s .)
+
+          # (b) a Codex review object on the head (an undated, pending one counts).
+          n=$(jq --arg bot "$CODEX_BOT" --arg head "$EVENT_HEAD" --arg since "$rows_since" \
+                '[.[] | select(.user == $bot and .commit == $head and (.at == "" or .at > $since))] | length' <<<"$reviews")
+          [ "$n" -eq 0 ] || decide false "Codex has a review on ${EVENT_HEAD:0:7}."
+
+          # (b) a row of any status for the head in Codex's summary comment:
+          # "| 📝 **Code Review** | ✅ **Completed** <time> | `abc1234` | PR opened |"
+          # On a retarget, only rows timed after it (a row with no time counts).
+          n=$(jq --arg bot "$CODEX_BOT" --arg head "$EVENT_HEAD" --arg since "$rows_since" '
+                [ .[] | select(.user == $bot and (.body | startswith("<!-- codex-pull-request-review-summary -->")))
+                  | .body | split("\n")[]
+                  | capture("\\A\\|[^|]+\\|(?<status>[^|]*)\\|\\s*`(?<sha>[0-9a-f]{7,40})`\\s*\\|") // empty
+                  | select(.sha as $s | $head | startswith($s))
+                  | ((.status | capture("datetime=\"(?<t>[0-9-]{10}T[0-9:]{8})") | .t + "Z") // "") as $t
+                  | select($since == "" or $t == "" or $t > $since) ] | length' <<<"$comments")
+          [ "$n" -eq 0 ] || decide false "Codex's summary already has a row for ${EVENT_HEAD:0:7}."
+
+          # (c) anyone's `@codex review` (or `@codex security review`) since.
+          n=$(jq --arg bot "$CODEX_BOT" --arg since "$since" '
+                [.[] | select(.user != $bot and .at >= $since
+                              and (.body | test("(\\A|\\s)@codex (security )?review\\b"; "i")))] | length' <<<"$comments")
+          [ "$n" -eq 0 ] || decide false "someone already asked for a Codex review of ${EVENT_HEAD:0:7}."
+
+          decide true "Codex has not touched ${EVENT_HEAD:0:7}; nudging."
+
+      - name: Nudge (the only use of the org PAT)
+        id: nudge
+        if: steps.decide.outputs.nudge == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AAA_ORG_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEPENDABOT_PR: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            if [ "$DEPENDABOT_PR" = true ]; then
+              echo "codex-auto-request #$PR_NUMBER: Dependabot PR; GitHub withholds AAA_ORG_TOKEN here. Comment \`@codex review\` by hand."
+              exit 0
+            fi
+            echo "::error::AAA_ORG_TOKEN is not available; a github-actions[bot] request would be refused by Codex. Not nudging."
+            exit 1
+          fi
+          url=$(gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -f body='@codex review' --jq '.html_url')
+          echo "codex-auto-request #$PR_NUMBER: posted @codex review ($url)."

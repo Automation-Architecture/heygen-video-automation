@@ -16,7 +16,10 @@ name: Doc auto-merge
 #   - no `no-auto-merge` label (the hold: add it and nothing here merges);
 #   - the branch is in this repository (a fork's PR never auto-merges);
 #   - the file list is read in full and holds exactly `changed_files`
-#     entries, fewer than 3000. Unreadable, short or oversized refuses.
+#     entries, fewer than 300: the same bound as review-verdict.yml's
+#     documentation exemption (its compare returns at most 300 files), so a
+#     PR this file would merge is never one review/verdict holds. Unreadable,
+#     short or oversized refuses.
 #
 # ── What "CI is green" means ───────────────────────────────────────────────
 # On the head commit, taking the newest run of each (app, check name):
@@ -26,7 +29,16 @@ name: Doc auto-merge
 #   - no other check-run is still running or waiting (action_required, which
 #     is what review/verdict shows until its re-run after ready_for_review or
 #     an unlabel lands), none concluded failure, timed_out, startup_failure or
-#     stale, and no commit status is pending, failure or error.
+#     stale, and no commit status is pending, failure or error;
+#   - Vercel, where the repo deploys with it: every `Vercel` / `Vercel – <p>`
+#     commit-status context found on any of the last 3 commits of the base
+#     branch must be present on the head and successful. Absent is pending,
+#     never green (Codex on aaa-productization-outreach#14): a PR evaluated
+#     before Vercel posts, or one Vercel never reports, does not merge. A
+#     repo whose Vercel project went dormant posts no Vercel status on its
+#     base branch, so it is not waited on (org survey 2026-10-01: exactly the
+#     25 repos with Vercel deployments whose base tip carries the status are
+#     the ones whose PR heads get one).
 # A `cancelled` newest run is a failure (it validated nothing; Codex on the
 # wave-1 rollout), EXCEPT a cancelled job of review-verdict.yml or of this
 # file: those are superseded by a concurrency group on every PR (review-
@@ -43,16 +55,47 @@ name: Doc auto-merge
 # filter; a code PR is refused, and any armed auto-merge disarmed, before the
 # settle, within seconds). A qualifying PR then waits SETTLE_SECONDS for CI to
 # register its checks, and re-reads them every POLL_SECONDS up to
-# WAIT_SECONDS. A CI run completing (workflow_run, the org's two CI workflow
-# names, same as auto-merge.yml) re-evaluates EVERY PR it names at its head
-# commit, each independently and in parallel, and so does a manual dispatch
-# (one PR). One run per PR and commit for PR events: a newer event for the
+# WAIT_SECONDS. EVERY event settles, whatever started the run: a completion
+# proves only that ONE workflow or check finished, possibly before slower CI
+# registered on the commit (Codex on .github#68; .github#69 item 1). These
+# re-evaluate EVERY open PR at the commit they are about, each independently
+# and in parallel:
+#   - workflow_run: a PR-check workflow completing. GitHub matches workflow
+#     NAMES exactly (no wildcard is documented), and Actions check-runs fire
+#     no check_run event, so the list is a STATIC list of every PR-triggered
+#     workflow name in the org (survey 2026-10-01, below; see "Keeping the
+#     workflow_run list current");
+#   - check_run completed (successfully) by any app other than Actions:
+#     agency-delivery/gate, Vercel Preview Comments and the like;
+#   - status success: an external commit status such as Vercel recovering
+#     on the same commit (Codex on aaa-productization-outreach#14). It names
+#     no PR, so the open PRs whose head is that commit are looked up;
+#   - workflow_dispatch (one PR). One run per PR and commit for PR events: a newer event for the
 # same commit cancels the older run, and every run re-evaluates from scratch. A run evaluates ONLY the commit its
 # event is about (HEAD_HINT); if the PR has moved on it stops, and the
 # synchronize run for the new head, which settles first, decides.
-# CI that outlasts WAIT_SECONDS and is not named "CI" or "PR Autopilot"
-# leaves the PR open with a warning; `gh workflow run doc-auto-merge.yml
-# -R <repo> -f pr_number=<n>` finishes it.
+# CI that outlasts WAIT_SECONDS and reports through none of those leaves the
+# PR open with a warning; `gh workflow run doc-auto-merge.yml -R <repo> -f
+# pr_number=<n>` finishes it.
+#
+# ── Keeping the workflow_run list current (static by design) ──────────────
+# The list is deliberately static: GitHub has no wildcard, and a list built
+# at run time cannot be expressed in `on:`. A name missing from it is not
+# unsafe (the PR is still evaluated on its own PR events and on every
+# check_run/status; only the re-trigger on that workflow's completion is
+# lost, so a doc PR whose slowest check is that workflow waits for the
+# WAIT_SECONDS poll or a manual dispatch). A name with no workflow behind it
+# is harmless. When a repo adds a workflow that runs on pull_request or
+# pull_request_target under a NEW `name:`, add the exact name here and to
+# ORG_CHECK_WORKFLOWS in tests/doc-auto-merge/test_doc_auto_merge.py, then
+# re-sync. To re-survey, list every repo's .github/workflows/*.yml whose
+# `on:` holds pull_request or pull_request_target and collect their `name:`
+# values (exclude this file and post-merge jobs gated on `closed`).
+#
+# Vercel "Ignored Build Step" (.github#69 item 2, unverified): if a repo's
+# Vercel project skips a preview build and posts NO status on the head, a doc
+# PR in a repo whose base branch carries a Vercel status waits as pending and
+# is left open with a warning; dispatch as above once confirmed.
 #
 # ── The merge ──────────────────────────────────────────────────────────────
 # Immediately before merging, the PR is read once more (state, draft, hold
@@ -65,14 +108,15 @@ name: Doc auto-merge
 # read-then-merge round trip (about a second) is not seen. The merge API has
 # no expected-base or expected-labels parameter.
 #
-# MERGE_TOKEN prefers the org PAT (AAA_ORG_TOKEN, 1Password vault aaa-APIs,
-# item aaa-org-token) because a merge made with GITHUB_TOKEN starts no
+# MERGE_TOKEN is the org PAT (AAA_ORG_TOKEN, 1Password vault aaa-APIs, item
+# aaa-org-token), with NO fallback: a merge made with GITHUB_TOKEN starts no
 # workflows, so `pull_request: closed` jobs (dashboard-sync, sentry-release)
-# and push-to-main deploys would silently skip doc merges. Everything else
-# reads with GITHUB_TOKEN.
+# and push-to-main deploys would silently skip doc merges (Codex P1 on
+# aios-coffee#135). Without it a qualifying PR is a red run, never merged.
+# Everything else reads with GITHUB_TOKEN.
 #
-# pull_request_target runs this file from the DEFAULT BRANCH, with a write
-# token, on any PR. Safe because nothing here checks out or runs PR code: it
+# pull_request_target (and workflow_run, check_run, status) runs this file
+# from the DEFAULT BRANCH, with a write token, on any PR. Safe because nothing here checks out or runs PR code: it
 # only reads the API and calls the merge endpoint. Do not add a checkout.
 #
 # Observability: every run ends with one line starting `doc-auto-merge #<n>:`
@@ -90,8 +134,39 @@ on:
     # (Codex P1 on .github#60). A code PR's run exits at the doc-only check
     # within seconds.
   workflow_run:
-    workflows: ["CI", "PR Autopilot"]
+    # Every workflow in the org that runs on pull_request/pull_request_target
+    # and can hold a check (survey of all 103 repos, 2026-10-01), plus PR
+    # Autopilot. Not this file (it would re-trigger itself) and not the
+    # post-merge jobs (dashboard sync, sentry release, portfolio sync). A
+    # name with no workflow behind it is harmless. Keep the list exact:
+    # GitHub matches names, not patterns.
+    workflows:
+      - "CI"
+      - "PR Autopilot"
+      - "quality"
+      - "Review verdict"
+      - "Review verdict evidence tests"
+      - "Doc auto-merge tests"
+      - "Python unit tests"
+      - "Test archive"
+      - "Validate"
+      - "schema-lint"
+      - "E2E Tests"
+      - "DB Migrations"
+      - "Demo script"
+      - "Migration check (PR)"
+      - "PR Quality Gates"
+      - "PR gate"
+      - "PR-Blocking Rules"
+      - "Accessibility — axe-core audit (LKID-94)"
+      - "Visual regression — eGFR chart (LKID-81)"
     types: [completed]
+  # A check from another app (agency-delivery/gate, Vercel) completing. GitHub
+  # sends no check_run event for Actions' own checks (those are workflow_run).
+  check_run:
+    types: [completed]
+  # An external commit status changing (Vercel redeploying the same commit).
+  status:
   workflow_dispatch:
     inputs:
       pr_number:
@@ -117,16 +192,24 @@ concurrency:
   # workflow_run with no PR (a push to main) gets a throwaway group.
   # Keyed on PR number AND head SHA: two open PRs at one commit must not
   # cancel each other (Codex on the wave-1 rollout PRs).
-  # A CI completion (workflow_run) can name several PRs; one run evaluates
-  # every one of them in parallel, so its group is unique to the run and it
-  # never cancels, or is cancelled by, a PR's own run. If both reach the
-  # merge, the loser reads the PR as merged and reports it, not an error.
-  group: doc-auto-merge-${{ github.repository }}-${{ (github.event.pull_request && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha)) || (github.event.workflow_run && format('run-{0}-{1}', github.event.workflow_run.head_sha, github.run_id)) || (github.event.inputs.pr_number && format('pr-{0}', github.event.inputs.pr_number)) || format('none-{0}', github.run_id) }}
+  # A CI completion (workflow_run), a check_run or a status can name several
+  # PRs; one run evaluates every one of them in parallel, so its group is
+  # unique to the run and it never cancels, or is cancelled by, a PR's own
+  # run. If both reach the merge, the loser reads the PR as merged and
+  # reports it, not an error.
+  group: doc-auto-merge-${{ github.repository }}-${{ (github.event.pull_request && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha)) || (github.event.workflow_run && format('run-{0}-{1}', github.event.workflow_run.head_sha, github.run_id)) || (github.event.check_run && format('check-{0}-{1}', github.event.check_run.head_sha, github.run_id)) || (github.event_name == 'status' && format('status-{0}-{1}', github.event.sha, github.run_id)) || (github.event.inputs.pr_number && format('pr-{0}', github.event.inputs.pr_number)) || format('none-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   doc-auto-merge:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
+    # Only events that can turn a PR green: a workflow or check that names a
+    # PR, a check from another app that passed, a status that turned success.
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null)
+      && (github.event_name != 'check_run' || (github.event.check_run.pull_requests[0] != null
+          && github.event.check_run.app.slug != 'github-actions'
+          && contains(fromJSON('["success","neutral","skipped"]'), github.event.check_run.conclusion)))
+      && (github.event_name != 'status' || github.event.state == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -134,16 +217,20 @@ jobs:
       - name: Merge a green documentation-only PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MERGE_TOKEN: ${{ secrets.AAA_ORG_TOKEN || secrets.GITHUB_TOKEN }}
+          # No GITHUB_TOKEN fallback (see the header): unset means no merge.
+          MERGE_TOKEN: ${{ secrets.AAA_ORG_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || '' }}
           # workflow_run: EVERY PR the completed run names. Each whose head is
           # the run's head commit and whose base is this repository is
           # evaluated independently (Brad, 2026-09-29).
-          PRS_JSON: ${{ github.event_name == 'workflow_run' && toJSON(github.event.workflow_run.pull_requests) || '' }}
+          # check_run: same, from the check's pull_requests.
+          PRS_JSON: ${{ (github.event_name == 'workflow_run' && toJSON(github.event.workflow_run.pull_requests)) || (github.event_name == 'check_run' && toJSON(github.event.check_run.pull_requests)) || '' }}
+          # status: names no PR; the open PRs at the commit are looked up.
+          LOOKUP_PRS: ${{ github.event_name == 'status' && 'true' || '' }}
           # The commit this event is about. A run evaluates only that commit;
           # if the PR has moved on, the run for the new head decides.
-          HEAD_HINT: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || '' }}
+          HEAD_HINT: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.event.check_run.head_sha || (github.event_name == 'status' && github.event.sha) || '' }}
           # This job's check-run name; it never waits on itself.
           JOB_NAME: doc-auto-merge
           # Same values as review-verdict.yml's evidence 0. Keep in step.
@@ -151,9 +238,16 @@ jobs:
           HOLD_LABEL: "no-auto-merge"
           # app-slug/check-name, comma-separated: reviewers, not CI.
           IGNORED_CHECKS: "greptile-apps/Greptile Review"
-          # workflow_run needs no settle: its commit's CI has just finished.
+          # Fewer than this many changed files. Same bound as review-verdict.yml's
+          # documentation exemption (its compare returns at most 300). Keep in step.
+          MAX_FILES: "300"
+          # A Vercel commit-status context: "Vercel" or "Vercel – <project>".
+          VERCEL_CONTEXT_PATTERN: '^Vercel( |\z)'
+          # Every event settles. A workflow_run, check_run or status proves
+          # only that ONE workflow or check finished, possibly before slower
+          # CI registered (Codex on .github#68; .github#69 item 1).
           # auto_merge_enabled disarms (if it must) before any settle.
-          SETTLE_SECONDS: ${{ github.event_name == 'workflow_run' && '0' || '60' }}
+          SETTLE_SECONDS: "60"
           WAIT_SECONDS: "1200"
           POLL_SECONDS: "20"
         run: |
@@ -167,9 +261,17 @@ jobs:
           SETTLE_SECONDS="${SETTLE_SECONDS:-0}"
           WAIT_SECONDS="${WAIT_SECONDS:-1200}"
           POLL_SECONDS="${POLL_SECONDS:-20}"
-          MERGE_TOKEN="${MERGE_TOKEN:-${GH_TOKEN:-}}"
+          # Never defaulted to GH_TOKEN (see the header).
+          MERGE_TOKEN="${MERGE_TOKEN:-}"
+          MAX_FILES="${MAX_FILES:-300}"
+          VERCEL_CONTEXT_PATTERN="${VERCEL_CONTEXT_PATTERN:-^Vercel( |\z)}"
           HEAD_HINT="${HEAD_HINT:-}"
           PRS_JSON="${PRS_JSON:-}"
+          LOOKUP_PRS="${LOOKUP_PRS:-}"
+          # JSON list of the Vercel contexts the head must carry, and the base
+          # branch it was read for; empty until read. A retarget re-reads it.
+          VERCEL_REQUIRED=""
+          VERCEL_FOR=""
           PR_CUR=""
 
           say() { echo "doc-auto-merge #${PR_NUMBER}: $*"; }
@@ -248,8 +350,8 @@ jobs:
             # A dispatch has no hint: pin the head it first read.
             HEAD_HINT="$HEAD"
             changed=$(echo "$pr" | jq -r '.changed_files // empty')
-            if ! [[ "$changed" =~ ^[0-9]+$ ]] || [ "$changed" -eq 0 ] || [ "$changed" -ge 3000 ]; then
-              refuse "changed_files is '${changed}', not 1-2999, so the diff cannot be shown to be all Markdown; not merging"
+            if ! [[ "$changed" =~ ^[0-9]+$ ]] || [ "$changed" -eq 0 ] || [ "$changed" -ge "$MAX_FILES" ]; then
+              refuse "changed_files is '${changed}', not 1-$((MAX_FILES - 1)) (review-verdict's documentation limit), so this workflow does not merge it; not merging"
             fi
             # The endpoint stops at 3000 files and --paginate reports a
             # truncated list as complete, hence the count comparison.
@@ -272,6 +374,31 @@ jobs:
               refuse "not documentation-only (${verdict}); code PRs are never auto-merged"
             fi
             FILE_COUNT="$changed"
+          }
+
+          # Sets VERCEL_REQUIRED to the Vercel status contexts found on the last
+          # 3 commits of the base branch (a JSON list; [] when the repo does not
+          # deploy with Vercel) and VERCEL_FOR to BASE_REF. Returns non-zero,
+          # leaving both empty, when any read fails: CI then reads as pending,
+          # never green.
+          vercel_required() {
+            local base_enc shas sha st found="[]"
+            VERCEL_REQUIRED=""; VERCEL_FOR=""
+            base_enc=$(jq -rn --arg b "$BASE_REF" '$b | @uri')
+            if ! shas=$(gh api "/repos/$REPO/commits?sha=$base_enc&per_page=3" --jq '.[].sha'); then
+              return 1
+            fi
+            [ -n "$shas" ] || return 1
+            for sha in $shas; do
+              [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+              if ! st=$(gh api --paginate "/repos/$REPO/commits/$sha/status?per_page=100" --jq '.statuses[]' | jq -s '.'); then
+                return 1
+              fi
+              found=$(jq -cn --argjson f "$found" --argjson st "$st" --arg pat "$VERCEL_CONTEXT_PATTERN" '
+                $f + [$st[] | .context | select(type == "string" and test($pat))] | unique') || return 1
+            done
+            VERCEL_REQUIRED="$found"
+            VERCEL_FOR="$BASE_REF"
           }
 
           # Prints green, pending:<why> or red:<why> for HEAD. Never exits the
@@ -314,9 +441,12 @@ jobs:
             if ! branch=$(gh api "/repos/$REPO/branches/$base_enc"); then
               echo "pending:could not read branch ${BASE_REF}"; return 0
             fi
+            if [ -z "$VERCEL_REQUIRED" ] || [ "$VERCEL_FOR" != "$BASE_REF" ]; then
+              echo "pending:could not read the base branch's Vercel statuses"; return 0
+            fi
             jq -rn --argjson runs "$runs" --argjson st "$statuses" --argjson rules "$rules" \
                 --argjson branch "$branch" --arg job "$JOB_NAME" --arg ign "$IGNORED_CHECKS" \
-                --argjson selfids "$self_ids" '
+                --argjson selfids "$self_ids" --argjson vercel "$VERCEL_REQUIRED" '
               def ok: IN("success", "neutral", "skipped");
               def newest: group_by([(.app.slug // ""), .name]) | map(max_by(.id));
               ($ign | split(",") | map(sub("^\\s+"; "") | sub("\\s+$"; "")) | map(select(length > 0))) as $ignored
@@ -333,14 +463,20 @@ jobs:
                  + [($branch.protection.required_status_checks.checks // [])[] | {context, app: .app_id}]
                  + [($branch.protection.required_status_checks.contexts // [])[] | {context: ., app: null}]
                  | unique_by([.context, .app])) as $req
-              | [$req[] | . as $r
+              # Parenthesised: `A + B as $x | ...` would bind as A + (B as $x | ...).
+              | ([$req[] | . as $r
                   | select(
                       ([$all[] | select(.name == $r.context
                                         and ($r.app == null or $r.app == -1 or .app.id == $r.app)
                                         and .status == "completed" and (.conclusion | ok))] | length) == 0
                       and ([$st[] | select(.context == $r.context and .state == "success"
                                            and ($r.app == null or $r.app == -1))] | length) == 0)
-                  | $r.context] as $missing
+                  | $r.context]
+                 # Vercel, where the base branch shows the repo deploys with it:
+                 # present on the head and successful, never assumed.
+                 + [$vercel[] | . as $c
+                    | select([$st[] | select(.context == $c and .state == "success")] | length == 0)
+                    | "\($c) (Vercel status not reported as success on this commit)"]) as $missing
               | ([$ci[] | select(.status == "completed"
                     and (.conclusion | IN("failure", "timed_out", "startup_failure", "stale", "cancelled")))
                   | "\(.name) (\(.conclusion))"]
@@ -358,6 +494,12 @@ jobs:
           # PR's evaluation.
           evaluate_pr() {
             qualify
+            # Merging with GITHUB_TOKEN would skip every post-merge workflow
+            # (Codex P1 on aios-coffee#135). Without the org PAT, hold, loudly.
+            if [ -z "$MERGE_TOKEN" ] || [ "$MERGE_TOKEN" = "${GH_TOKEN:-}" ]; then
+              echo "::error::#$PR_NUMBER is documentation-only but AAA_ORG_TOKEN is not available to this run, and a merge with GITHUB_TOKEN would start no post-merge workflows. Not merging."
+              exit 1
+            fi
             say "documentation-only (${FILE_COUNT} files) at ${HEAD:0:7} into ${BASE_REF}; waiting for CI."
             if [ "$SETTLE_SECONDS" -gt 0 ]; then
               # Let CI register its check-runs before the first look.
@@ -366,6 +508,9 @@ jobs:
             fi
             deadline=$((SECONDS + WAIT_SECONDS))
             while true; do
+              # Read once per evaluation and base branch (retried until it
+              # reads): a retarget while waiting re-reads it (Codex on .github#68).
+              { [ -n "$VERCEL_REQUIRED" ] && [ "$VERCEL_FOR" = "$BASE_REF" ]; } || vercel_required || true
               state=$(checks_state)
               case "$state" in
                 green) break ;;
@@ -389,6 +534,7 @@ jobs:
             if [ "$BASE_REF" != "$locked_base" ]; then
               done_ "base moved while checking; the run for the new state decides."
             fi
+            { [ -n "$VERCEL_REQUIRED" ] && [ "$VERCEL_FOR" = "$BASE_REF" ]; } || vercel_required || true
             state=$(checks_state)
             if [ "$state" != "green" ]; then
               refuse "CI changed in the final snapshot (${state#*:}); not merging. A later CI completion re-evaluates"
@@ -425,6 +571,23 @@ jobs:
                 .[]? | select(.head.sha == $sha and ((.base.repo.url // "") | endswith("/repos/" + $repo)))
                 | .number | tostring'); then
               echo "::error::Could not read the PRs this CI run names."
+              exit 1
+            fi
+          elif [ -n "$LOOKUP_PRS" ]; then
+            # A commit status names no PR: every open PR in this repository
+            # whose head is that commit. An unreadable lookup is a red run.
+            if ! [[ "$HEAD_HINT" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::The status event names no readable commit ('${HEAD_HINT}')."
+              exit 1
+            fi
+            if ! found=$(gh api --paginate "/repos/$REPO/commits/$HEAD_HINT/pulls?per_page=100" | jq -s 'add // []'); then
+              echo "::error::Could not look up the PRs at ${HEAD_HINT:0:7}."
+              exit 1
+            fi
+            if ! mapfile -t targets < <(echo "$found" | jq -r --arg sha "$HEAD_HINT" --arg repo "$REPO" '
+                .[]? | select(.state == "open" and .head.sha == $sha and (.base.repo.full_name // "") == $repo)
+                | .number | tostring'); then
+              echo "::error::Could not read the PRs at ${HEAD_HINT:0:7}."
               exit 1
             fi
           elif [ -n "$PR_NUMBER" ]; then
