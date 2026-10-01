@@ -81,7 +81,7 @@ name: Doc auto-merge
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled, auto_merge_enabled]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited, labeled, unlabeled, auto_merge_enabled]
     # NO `paths` filter: arming GitHub native auto-merge on ANY PR, including
     # a code PR with no Markdown file, must be evaluated at once so a held or
     # non-documentation PR has it disarmed (Brad, 2026-09-29). A filter would
@@ -214,15 +214,18 @@ jobs:
             if [ "$(echo "$pr" | jq -r '.state // empty')" != "open" ]; then
               done_ "not open; nothing to do."
             fi
+            # Native auto-merge is never left armed, on any open PR, drafts
+            # included: code needs a deliberate human merge, and a
+            # documentation-only PR is merged by this workflow, whose CI gate
+            # (every visible check green) is stricter than the required checks
+            # GitHub waits for (Codex on the #60 re-sync PRs). Before the draft
+            # return, and `converted_to_draft` triggers, so a PR armed and then
+            # drafted cannot merge natively the moment it is marked ready
+            # (Codex on the wave-2 PRs).
+            disarm_if_armed "this workflow merges documentation-only PRs itself, and code is merged by a person"
             if [ "$(echo "$pr" | jq -r 'if .draft == false then "no" else "yes" end')" != "no" ]; then
               done_ "draft; drafts never auto-merge."
             fi
-            # Native auto-merge is never left armed, on any PR: code needs a
-            # deliberate human merge, and a documentation-only PR is merged by
-            # this workflow, whose CI gate (every visible check green) is
-            # stricter than the required checks GitHub waits for (Codex on
-            # the #60 re-sync PRs).
-            disarm_if_armed "this workflow merges documentation-only PRs itself, and code is merged by a person"
             case "$(echo "$pr" | jq -r --arg l "$HOLD_LABEL" '
                 if (.labels | type) != "array" then "unreadable"
                 elif any(.labels[]; .name == $l) then "yes" else "no" end')" in
@@ -302,7 +305,10 @@ jobs:
             if ! statuses=$(gh api --paginate "/repos/$REPO/commits/$HEAD/status?per_page=100" --jq '.statuses[]' | jq -s '.'); then
               echo "pending:could not read commit statuses"; return 0
             fi
-            if ! rules=$(gh api "/repos/$REPO/rules/branches/$base_enc"); then
+            # Paginated: the endpoint returns 30 rules per page by default, and a
+            # required_status_checks rule past the first page would be missed
+            # (Codex on the wave-2 PRs).
+            if ! rules=$(gh api --paginate "/repos/$REPO/rules/branches/$base_enc?per_page=100" | jq -s 'add // []'); then
               echo "pending:could not read the rules on ${BASE_REF}"; return 0
             fi
             if ! branch=$(gh api "/repos/$REPO/branches/$base_enc"); then
