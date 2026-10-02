@@ -48,6 +48,16 @@ name: Codex auto-request
 #     the merge. Same definition as doc-auto-merge.yml: every changed path and
 #     every previous name of a renamed file ends in .md or .markdown (NOT
 #     .mdx), and the PR has 1-299 changed files. Keep the two in step.
+#     EXCEPT a Markdown-only PR carrying the `no-auto-merge` hold label (or
+#     whose labels cannot be read): review-verdict.yml switches the
+#     documentation exemption off for it, so it needs Codex like code and is
+#     nudged like code (Codex on .github#72). Adding the hold label to an open
+#     PR (`labeled`, that label only) runs this rule again, counting (b) and
+#     (c) only after the label (below): a Markdown-only PR retargeted while
+#     unheld was skipped by the retarget run, so evidence from before that
+#     retarget must not suppress the nudge (Codex P2 on qa-template#8 and
+#     aa-project-pipeline#18). An extra nudge is acceptable; a missed one is
+#     not.
 #   - Otherwise wait DELAY_SECONDS (3 minutes) so Codex's own auto-review can
 #     start, then post `@codex review` once if ALL hold:
 #   (a) the PR is still open, still not a draft, and the event's head is
@@ -60,8 +70,8 @@ name: Codex auto-request
 #       otherwise suppress the only request Codex will act on.
 # Otherwise it does nothing. No retries, no polling. "After this head was
 # pushed" is the event time for synchronize and the head commit's committer
-# date for opened/reopened. For a retarget and for ready_for_review, (b) and
-# (c) count only what came after the event: a retarget makes earlier reviews
+# date for opened/reopened. For a retarget, ready_for_review and the hold
+# label, (b) and (c) count only what came after the event: a retarget makes earlier reviews
 # stale, and while the PR was a draft its pushes and retargets ran nothing
 # here, so the ready event is the only reliable time ("draft -> ready
 # fallback"). Codex itself reviews on "Draft marked ready", which then skips
@@ -73,7 +83,9 @@ name: Codex auto-request
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    # labeled: only the hold label (job condition below), which turns a
+    # Markdown-only PR into one that needs Codex.
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled]
 
 permissions:
   contents: read
@@ -98,7 +110,8 @@ jobs:
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      (github.event.action != 'edited' || github.event.changes.base != null)
+      (github.event.action != 'edited' || github.event.changes.base != null) &&
+      (github.event.action != 'labeled' || github.event.label.name == 'no-auto-merge')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -110,15 +123,20 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # synchronize: the push. edited (retarget): the retarget.
-          # ready_for_review: the ready event. Else empty.
-          EVENT_AT: ${{ (github.event.action == 'synchronize' || github.event.action == 'edited' || github.event.action == 'ready_for_review') && github.event.pull_request.updated_at || '' }}
+          # ready_for_review: the ready event. labeled (the hold label): the
+          # label. Else empty.
+          EVENT_AT: ${{ (github.event.action == 'synchronize' || github.event.action == 'edited' || github.event.action == 'ready_for_review' || github.event.action == 'labeled') && github.event.pull_request.updated_at || '' }}
           # Count Codex rows, reviews and requests only after EVENT_AT.
-          AFTER_EVENT: ${{ github.event.action == 'edited' || github.event.action == 'ready_for_review' }}
+          AFTER_EVENT: ${{ github.event.action == 'edited' || github.event.action == 'ready_for_review' || github.event.action == 'labeled' }}
           CODEX_BOT: "chatgpt-codex-connector[bot]"
           DELAY_SECONDS: "180"
           # doc-auto-merge.yml's definition of a Markdown-only PR.
           DOC_ONLY_PATTERN: '\.(md|markdown)\z'
           MAX_DOC_FILES: "300"
+          # review-verdict.yml's hold label: it switches the documentation
+          # exemption off, so a held Markdown-only PR is nudged. Same name as
+          # in the job condition above.
+          HOLD_LABEL: "no-auto-merge"
         run: |
           set -euo pipefail
           OUT="${GITHUB_OUTPUT:-/dev/null}"
@@ -147,7 +165,15 @@ jobs:
                      and all(.[]; (.filename | type) == "string" and .filename != "")
                      and ([.[] | .filename, (.previous_filename // empty)] | all(type == "string" and test($pat)))
                   then "doc" else "code" end' <<<"$files")
-            [ "$kind" != doc ] || decide false "Markdown-only PR ($changed file(s)); the gate needs no Codex review, so no nudge."
+            # Held (or labels unreadable): review-verdict needs Codex for it.
+            held=$(jq -r --arg l "${HOLD_LABEL:-no-auto-merge}" '
+                  if (.labels | type) != "array" then "yes"
+                  elif any(.labels[]; .name == $l) then "yes" else "no" end' <<<"$pr")
+            if [ "$kind" = doc ] && [ "$held" != no ]; then
+              say "Markdown-only, but held by the ${HOLD_LABEL:-no-auto-merge} label (or its labels are unreadable), so review-verdict needs Codex; treated like code."
+            else
+              [ "$kind" != doc ] || decide false "Markdown-only PR ($changed file(s)); the gate needs no Codex review, so no nudge."
+            fi
           fi
 
           sleep "${DELAY_SECONDS:-180}"
