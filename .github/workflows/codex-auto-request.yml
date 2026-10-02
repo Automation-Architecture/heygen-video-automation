@@ -52,7 +52,12 @@ name: Codex auto-request
 #     whose labels cannot be read): review-verdict.yml switches the
 #     documentation exemption off for it, so it needs Codex like code and is
 #     nudged like code (Codex on .github#72). Adding the hold label to an open
-#     PR (`labeled`, that label only) runs this rule again.
+#     PR (`labeled`, that label only) runs this rule again, counting (b) and
+#     (c) only after the label (below): a Markdown-only PR retargeted while
+#     unheld was skipped by the retarget run, so evidence from before that
+#     retarget must not suppress the nudge (Codex P2 on qa-template#8 and
+#     aa-project-pipeline#18). An extra nudge is acceptable; a missed one is
+#     not.
 #   - Otherwise wait DELAY_SECONDS (3 minutes) so Codex's own auto-review can
 #     start, then post `@codex review` once if ALL hold:
 #   (a) the PR is still open, still not a draft, and the event's head is
@@ -65,8 +70,8 @@ name: Codex auto-request
 #       otherwise suppress the only request Codex will act on.
 # Otherwise it does nothing. No retries, no polling. "After this head was
 # pushed" is the event time for synchronize and the head commit's committer
-# date for opened/reopened. For a retarget and for ready_for_review, (b) and
-# (c) count only what came after the event: a retarget makes earlier reviews
+# date for opened/reopened. For a retarget, ready_for_review and the hold
+# label, (b) and (c) count only what came after the event: a retarget makes earlier reviews
 # stale, and while the PR was a draft its pushes and retargets ran nothing
 # here, so the ready event is the only reliable time ("draft -> ready
 # fallback"). Codex itself reviews on "Draft marked ready", which then skips
@@ -118,10 +123,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           # synchronize: the push. edited (retarget): the retarget.
-          # ready_for_review: the ready event. Else empty.
-          EVENT_AT: ${{ (github.event.action == 'synchronize' || github.event.action == 'edited' || github.event.action == 'ready_for_review') && github.event.pull_request.updated_at || '' }}
+          # ready_for_review: the ready event. labeled (the hold label): the
+          # label. Else empty.
+          EVENT_AT: ${{ (github.event.action == 'synchronize' || github.event.action == 'edited' || github.event.action == 'ready_for_review' || github.event.action == 'labeled') && github.event.pull_request.updated_at || '' }}
           # Count Codex rows, reviews and requests only after EVENT_AT.
-          AFTER_EVENT: ${{ github.event.action == 'edited' || github.event.action == 'ready_for_review' }}
+          AFTER_EVENT: ${{ github.event.action == 'edited' || github.event.action == 'ready_for_review' || github.event.action == 'labeled' }}
           CODEX_BOT: "chatgpt-codex-connector[bot]"
           DELAY_SECONDS: "180"
           # doc-auto-merge.yml's definition of a Markdown-only PR.
