@@ -48,6 +48,11 @@ name: Codex auto-request
 #     the merge. Same definition as doc-auto-merge.yml: every changed path and
 #     every previous name of a renamed file ends in .md or .markdown (NOT
 #     .mdx), and the PR has 1-299 changed files. Keep the two in step.
+#     EXCEPT a Markdown-only PR carrying the `no-auto-merge` hold label (or
+#     whose labels cannot be read): review-verdict.yml switches the
+#     documentation exemption off for it, so it needs Codex like code and is
+#     nudged like code (Codex on .github#72). Adding the hold label to an open
+#     PR (`labeled`, that label only) runs this rule again.
 #   - Otherwise wait DELAY_SECONDS (3 minutes) so Codex's own auto-review can
 #     start, then post `@codex review` once if ALL hold:
 #   (a) the PR is still open, still not a draft, and the event's head is
@@ -73,7 +78,9 @@ name: Codex auto-request
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    # labeled: only the hold label (job condition below), which turns a
+    # Markdown-only PR into one that needs Codex.
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled]
 
 permissions:
   contents: read
@@ -98,7 +105,8 @@ jobs:
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      (github.event.action != 'edited' || github.event.changes.base != null)
+      (github.event.action != 'edited' || github.event.changes.base != null) &&
+      (github.event.action != 'labeled' || github.event.label.name == 'no-auto-merge')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -119,6 +127,10 @@ jobs:
           # doc-auto-merge.yml's definition of a Markdown-only PR.
           DOC_ONLY_PATTERN: '\.(md|markdown)\z'
           MAX_DOC_FILES: "300"
+          # review-verdict.yml's hold label: it switches the documentation
+          # exemption off, so a held Markdown-only PR is nudged. Same name as
+          # in the job condition above.
+          HOLD_LABEL: "no-auto-merge"
         run: |
           set -euo pipefail
           OUT="${GITHUB_OUTPUT:-/dev/null}"
@@ -147,7 +159,15 @@ jobs:
                      and all(.[]; (.filename | type) == "string" and .filename != "")
                      and ([.[] | .filename, (.previous_filename // empty)] | all(type == "string" and test($pat)))
                   then "doc" else "code" end' <<<"$files")
-            [ "$kind" != doc ] || decide false "Markdown-only PR ($changed file(s)); the gate needs no Codex review, so no nudge."
+            # Held (or labels unreadable): review-verdict needs Codex for it.
+            held=$(jq -r --arg l "${HOLD_LABEL:-no-auto-merge}" '
+                  if (.labels | type) != "array" then "yes"
+                  elif any(.labels[]; .name == $l) then "yes" else "no" end' <<<"$pr")
+            if [ "$kind" = doc ] && [ "$held" != no ]; then
+              say "Markdown-only, but held by the ${HOLD_LABEL:-no-auto-merge} label (or its labels are unreadable), so review-verdict needs Codex; treated like code."
+            else
+              [ "$kind" != doc ] || decide false "Markdown-only PR ($changed file(s)); the gate needs no Codex review, so no nudge."
+            fi
           fi
 
           sleep "${DELAY_SECONDS:-180}"

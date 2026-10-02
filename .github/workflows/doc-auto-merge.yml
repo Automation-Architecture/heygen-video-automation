@@ -45,6 +45,19 @@ name: Doc auto-merge
 # verdict's `publish`), and their real output is the `review/verdict` check.
 # Which workflow a cancelled Actions job belongs to is read from its run
 # (details_url -> actions/runs/<id> -> path), never guessed from its name.
+# A check-run bound to ONE pull request counts only for that PR: one whose
+# external_id starts `<this repo>#<n>:` is ignored when evaluating any other
+# PR, even at the same head commit. Two publishers bind this way: the delivery
+# gate (`<repo>#<pr>:<base sha>:<head sha>:<policy revision>`) and
+# review-verdict.yml (`<repo>#<pr>:<base sha>:<head sha>:review-verdict`).
+# Two open PRs at one commit each get their own gate verdict and their own
+# review/verdict; the newest of them must not stand in for the other (Codex
+# P1 and P2 on aios-coffee#135). But external_id is opaque to GitHub: a
+# ruleset enforces the newest run of a required check on the commit,
+# whichever PR it belongs to. So a required check that passed for this PR
+# while the commit's newest run of it (another PR's) has not, is PENDING, not
+# green: no merge call GitHub would refuse, and the PR waits for a fresh run
+# of its own (Codex on .github#76).
 # Not counted: this job's own check, and the reviewer checks in
 # IGNORED_CHECKS (Greptile is a reviewer, not CI, and no review is required).
 # In a ruleset repo, `review/verdict` is required, and review-verdict.yml
@@ -101,12 +114,23 @@ name: Doc auto-merge
 # Immediately before merging, the PR is read once more (state, draft, hold
 # label, head, base, file list) and must still match what was checked. The
 # merge call pins the head (`sha`), so a push that lands in between makes
-# GitHub refuse it. Squash only, never an admin bypass: GitHub still applies
-# every ruleset and protection rule at merge time. The result is re-read and
-# a merge GitHub did not record is a red run, never a silent one.
-# Residual (accepted): a hold label or a retarget that lands inside the final
-# read-then-merge round trip (about a second) is not seen. The merge API has
-# no expected-base or expected-labels parameter.
+# GitHub refuse it. The BASE is pinned too (aios-coffee#135 "Pin the base
+# SHA"; "require branches to be up to date" is off org-wide, so GitHub no
+# longer refuses a merge onto a moved base): the final snapshot reads the base
+# branch's tip SHA first and evaluates Vercel and CI against it, and the tip
+# is re-read immediately before the merge call. A tip that moved, or cannot be
+# read, is a red run and nothing merges; the next event (the delivery gate
+# re-evaluates on every base push) or a dispatch evaluates the new base. After
+# the merge, the squash commit's parent must be the pinned tip; if not, the
+# run is red (the merge stands, but never silently). Squash only, never an
+# admin bypass: GitHub still applies every ruleset and protection rule at
+# merge time. The result is re-read and a merge GitHub did not record is a
+# red run, never a silent one.
+# Residual (accepted): a base push, hold label or retarget that lands inside
+# the final read-then-merge round trip (about a second) is not prevented. The
+# merge API (PUT /pulls/{n}/merge: commit_title, commit_message, sha,
+# merge_method) has no expected-base or expected-labels parameter; the
+# post-merge parent check reports the base case.
 #
 # MERGE_TOKEN is the org PAT (AAA_ORG_TOKEN, 1Password vault aaa-APIs, item
 # aaa-org-token), with NO fallback: a merge made with GITHUB_TOKEN starts no
@@ -138,7 +162,7 @@ on:
     # and can hold a check (survey of all 103 repos, 2026-10-01), plus PR
     # Autopilot and the canonical Codex auto-request (a check on every PR;
     # on a Markdown-only PR it exits within seconds). Not this file (it would re-trigger itself) and not the
-    # post-merge jobs (dashboard sync, sentry release, portfolio sync). A
+    # post-merge jobs (dashboard sync, sentry release, portfolio phase change). A
     # name with no workflow behind it is harmless. Keep the list exact:
     # GitHub matches names, not patterns.
     workflows:
@@ -163,6 +187,11 @@ on:
       - "PR-Blocking Rules"
       - "Accessibility — axe-core audit (LKID-94)"
       - "Visual regression — eGFR chart (LKID-81)"
+      # aaa-portfolio: these sync jobs also run on every pull_request (bare
+      # `pull_request:`, read 2026-10-02), so each holds a check on PR heads.
+      - "Portfolio — Sync GitHub activity"
+      - "Portfolio — Sync Jira"
+      - "Portfolio — Sync legacy client registry"
     types: [completed]
   # A check from another app (agency-delivery/gate, Vercel) completing. GitHub
   # sends no check_run event for Actions' own checks (those are workflow_run).
@@ -244,8 +273,11 @@ jobs:
           # Fewer than this many changed files. Same bound as review-verdict.yml's
           # documentation exemption (its compare returns at most 300). Keep in step.
           MAX_FILES: "300"
-          # A Vercel commit-status context: "Vercel" or "Vercel – <project>".
-          VERCEL_CONTEXT_PATTERN: '^Vercel( |\z)'
+          # A Vercel commit-status context: exactly "Vercel", or "Vercel – <project>"
+          # (en dash), the two documented forms. Anything else starting with
+          # "Vercel " is not Vercel's deployment status, so it is never required
+          # (Codex on skill-shelf#100).
+          VERCEL_CONTEXT_PATTERN: '^Vercel( – .+)?\z'
           # Every event settles. A workflow_run, check_run or status proves
           # only that ONE workflow or check finished, possibly before slower
           # CI registered (Codex on .github#68; .github#69 item 1).
@@ -267,14 +299,19 @@ jobs:
           # Never defaulted to GH_TOKEN (see the header).
           MERGE_TOKEN="${MERGE_TOKEN:-}"
           MAX_FILES="${MAX_FILES:-300}"
-          VERCEL_CONTEXT_PATTERN="${VERCEL_CONTEXT_PATTERN:-^Vercel( |\z)}"
+          VERCEL_CONTEXT_PATTERN="${VERCEL_CONTEXT_PATTERN:-^Vercel( – .+)?\z}"
           HEAD_HINT="${HEAD_HINT:-}"
           PRS_JSON="${PRS_JSON:-}"
           LOOKUP_PRS="${LOOKUP_PRS:-}"
           # JSON list of the Vercel contexts the head must carry, and the base
-          # branch it was read for; empty until read. A retarget re-reads it.
+          # COMMIT (tip SHA) it was read for; empty until read. A base that
+          # advanced or a retarget re-reads it (Codex on the wave-2 PRs:
+          # keyed on the branch name, a new Vercel project on a newer tip was
+          # missed).
           VERCEL_REQUIRED=""
           VERCEL_FOR=""
+          # The base branch's tip SHA, read by read_base_tip.
+          BASE_TIP=""
           PR_CUR=""
 
           say() { echo "doc-auto-merge #${PR_NUMBER}: $*"; }
@@ -379,19 +416,35 @@ jobs:
             FILE_COUNT="$changed"
           }
 
+          # Sets BASE_TIP to the base branch's current tip SHA. Returns non-zero,
+          # leaving it empty, when it cannot be read. Each path segment of the
+          # branch name is URL-encoded; "/" separates segments of the ref.
+          read_base_tip() {
+            local ref_enc tip
+            BASE_TIP=""
+            ref_enc=$(jq -rn --arg b "$BASE_REF" '$b | @uri | gsub("%2F"; "/")')
+            if ! tip=$(gh api "/repos/$REPO/git/ref/heads/$ref_enc" --jq '.object.sha // empty'); then
+              return 1
+            fi
+            [[ "$tip" =~ ^[0-9a-f]{40}$ ]] || return 1
+            BASE_TIP="$tip"
+          }
+
           # Sets VERCEL_REQUIRED to the Vercel status contexts found on the last
-          # 3 commits of the base branch (a JSON list; [] when the repo does not
-          # deploy with Vercel) and VERCEL_FOR to BASE_REF. Returns non-zero,
-          # leaving both empty, when any read fails: CI then reads as pending,
-          # never green.
+          # 3 commits of the base branch ending at BASE_TIP (a JSON list; []
+          # when the repo does not deploy with Vercel) and VERCEL_FOR to
+          # BASE_TIP. Returns non-zero, leaving both empty, when any read fails:
+          # CI then reads as pending, never green.
           vercel_required() {
-            local base_enc shas sha st found="[]"
+            local shas sha st found="[]"
             VERCEL_REQUIRED=""; VERCEL_FOR=""
-            base_enc=$(jq -rn --arg b "$BASE_REF" '$b | @uri')
-            if ! shas=$(gh api "/repos/$REPO/commits?sha=$base_enc&per_page=3" --jq '.[].sha'); then
+            [[ "$BASE_TIP" =~ ^[0-9a-f]{40}$ ]] || return 1
+            if ! shas=$(gh api "/repos/$REPO/commits?sha=$BASE_TIP&per_page=3" --jq '.[].sha'); then
               return 1
             fi
             [ -n "$shas" ] || return 1
+            # The listing starts at the tip it was asked for.
+            [ "$(printf '%s\n' "$shas" | head -n 1)" = "$BASE_TIP" ] || return 1
             for sha in $shas; do
               [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
               if ! st=$(gh api --paginate "/repos/$REPO/commits/$sha/status?per_page=100" --jq '.statuses[]' | jq -s '.'); then
@@ -401,7 +454,7 @@ jobs:
                 $f + [$st[] | .context | select(type == "string" and test($pat))] | unique') || return 1
             done
             VERCEL_REQUIRED="$found"
-            VERCEL_FOR="$BASE_REF"
+            VERCEL_FOR="$BASE_TIP"
           }
 
           # Prints green, pending:<why> or red:<why> for HEAD. Never exits the
@@ -444,16 +497,27 @@ jobs:
             if ! branch=$(gh api "/repos/$REPO/branches/$base_enc"); then
               echo "pending:could not read branch ${BASE_REF}"; return 0
             fi
-            if [ -z "$VERCEL_REQUIRED" ] || [ "$VERCEL_FOR" != "$BASE_REF" ]; then
+            if [ -z "$VERCEL_REQUIRED" ] || [ -z "$BASE_TIP" ] || [ "$VERCEL_FOR" != "$BASE_TIP" ]; then
               echo "pending:could not read the base branch's Vercel statuses"; return 0
             fi
             jq -rn --argjson runs "$runs" --argjson st "$statuses" --argjson rules "$rules" \
                 --argjson branch "$branch" --arg job "$JOB_NAME" --arg ign "$IGNORED_CHECKS" \
-                --argjson selfids "$self_ids" --argjson vercel "$VERCEL_REQUIRED" '
+                --argjson selfids "$self_ids" --argjson vercel "$VERCEL_REQUIRED" \
+                --arg repo "$REPO" --arg pr "$PR_NUMBER" '
               def ok: IN("success", "neutral", "skipped");
               def newest: group_by([(.app.slug // ""), .name]) | map(max_by(.id));
+              # Bound to another PR of this repository by its external_id
+              # (`<repo>#<n>:...`, the gate candidate key): skip it for this PR.
+              def other_pr:
+                ([(.external_id // "") | strings
+                  | capture("^(?<repo>[^#:/\\s]+/[^#:/\\s]+)#(?<n>[0-9]+):")] | .[0]) as $m
+                | $m != null and ($m.repo | ascii_downcase) == ($repo | ascii_downcase) and $m.n != $pr;
               ($ign | split(",") | map(sub("^\\s+"; "") | sub("\\s+$"; "")) | map(select(length > 0))) as $ignored
-              | ($runs | newest) as $all
+              | ($runs | map(select(other_pr | not)) | newest) as $all
+              # What GitHub itself enforces: the newest run per (app, name) on
+              # the commit, whichever PR it belongs to (external_id is opaque
+              # to rulesets; Codex on .github#76).
+              | ($runs | newest) as $enforced
               # Newest status per context, like check-runs: a retried context
               # must not stay red or pending on its older entry.
               | ($st | group_by(.context) | map(max_by([(.updated_at // ""), (.id // 0)]))) as $st
@@ -480,6 +544,15 @@ jobs:
                  + [$vercel[] | . as $c
                     | select([$st[] | select(.context == $c and .state == "success")] | length == 0)
                     | "\($c) (Vercel status not reported as success on this commit)"]) as $missing
+              # A required check that passed for THIS PR but whose newest run on
+              # the commit belongs to another PR and has not passed: GitHub would
+              # refuse the merge, so wait (never a red run, never a merge).
+              | ([$req[] | . as $r
+                  | $enforced[] | select(.name == $r.context
+                                         and ($r.app == null or $r.app == -1 or .app.id == $r.app)
+                                         and other_pr
+                                         and (.status != "completed" or (.conclusion | ok | not)))
+                  | "\(.name) (\(.conclusion // .status) for PR #\(.external_id | capture("#(?<n>[0-9]+):").n))"]) as $shadowed
               | ([$ci[] | select(.status == "completed"
                     and (.conclusion | IN("failure", "timed_out", "startup_failure", "stale", "cancelled")))
                   | "\(.name) (\(.conclusion))"]
@@ -489,6 +562,7 @@ jobs:
               | if ($red | length) > 0 then "red:" + ($red | join(", "))
                 elif ($running | length) > 0 then "pending:still running or waiting: " + ($running | unique | join(", "))
                 elif ($missing | length) > 0 then "pending:required check(s) not passed yet: " + ($missing | unique | join(", "))
+                elif ($shadowed | length) > 0 then "pending:GitHub enforces the newest run of a required check on this commit, and it belongs to another PR: " + ($shadowed | unique | join(", ")) + "; a fresh run for this PR (e.g. gh workflow run review-verdict.yml -f pr_number=" + $pr + " -f head_sha=<head>) clears it"
                 else "green" end' || echo "pending:could not evaluate the checks"
           }
 
@@ -511,9 +585,11 @@ jobs:
             fi
             deadline=$((SECONDS + WAIT_SECONDS))
             while true; do
-              # Read once per evaluation and base branch (retried until it
-              # reads): a retarget while waiting re-reads it (Codex on .github#68).
-              { [ -n "$VERCEL_REQUIRED" ] && [ "$VERCEL_FOR" = "$BASE_REF" ]; } || vercel_required || true
+              # Read once per base tip (retried until it reads): a base that
+              # advances, or a retarget, while waiting re-reads it (Codex on
+              # .github#68 and the wave-2 PRs).
+              read_base_tip || true
+              { [ -n "$VERCEL_REQUIRED" ] && [ -n "$BASE_TIP" ] && [ "$VERCEL_FOR" = "$BASE_TIP" ]; } || vercel_required || true
               state=$(checks_state)
               case "$state" in
                 green) break ;;
@@ -531,19 +607,37 @@ jobs:
 
             # Final snapshot, immediately before the merge: PR metadata and files
             # again, and CI again (a re-run can turn a check pending or red after
-            # the loop saw green).
+            # the loop saw green). The base tip is read FIRST and pinned: this
+            # snapshot is evaluated against it (see "The merge" in the header).
             locked_base="$BASE_REF"
             qualify
             if [ "$BASE_REF" != "$locked_base" ]; then
               done_ "base moved while checking; the run for the new state decides."
             fi
-            { [ -n "$VERCEL_REQUIRED" ] && [ "$VERCEL_FOR" = "$BASE_REF" ]; } || vercel_required || true
+            if ! read_base_tip; then
+              echo "::error::Could not read the tip of ${BASE_REF} for documentation-only #$PR_NUMBER, so the base it would merge onto cannot be pinned. Nothing was merged."
+              exit 1
+            fi
+            PINNED_BASE="$BASE_TIP"
+            { [ -n "$VERCEL_REQUIRED" ] && [ "$VERCEL_FOR" = "$BASE_TIP" ]; } || vercel_required || true
             state=$(checks_state)
             if [ "$state" != "green" ]; then
               refuse "CI changed in the final snapshot (${state#*:}); not merging. A later CI completion re-evaluates"
             fi
+            # Re-read the base tip immediately before the merge call: the merge
+            # API pins only the head (`sha`), and with "require branches to be up
+            # to date" off GitHub no longer refuses a merge onto a base that
+            # moved. A moved or unreadable base is a red run and no merge.
+            if ! read_base_tip; then
+              echo "::error::Could not re-read the tip of ${BASE_REF} before merging documentation-only #$PR_NUMBER (evaluated against ${PINNED_BASE:0:7}). Nothing was merged."
+              exit 1
+            fi
+            if [ "$BASE_TIP" != "$PINNED_BASE" ]; then
+              echo "::error::The base ${BASE_REF} moved from ${PINNED_BASE:0:7} to ${BASE_TIP:0:7} after documentation-only #$PR_NUMBER was evaluated, so the evaluation no longer describes what would merge. Nothing was merged; re-run: gh workflow run doc-auto-merge.yml -R $REPO -f pr_number=$PR_NUMBER"
+              exit 1
+            fi
 
-            say "CI green on ${HEAD:0:7}; squash-merging."
+            say "CI green on ${HEAD:0:7} against base ${PINNED_BASE:0:7}; squash-merging."
             if ! GH_TOKEN="$MERGE_TOKEN" gh api -X PUT "/repos/$REPO/pulls/$PR_NUMBER/merge" \
                   -f merge_method=squash -f sha="$HEAD" >/dev/null; then
               # Another run for this PR (a PR event and a CI completion) may have
@@ -559,10 +653,21 @@ jobs:
               echo "::error::The merge call for #$PR_NUMBER returned success but the PR reads as not merged (${merged})."
               exit 1
             fi
+            # The squash commit's parent is the base it really landed on. A base
+            # that moved inside the final re-read-then-merge round trip (the
+            # residual the API leaves) cannot be undone here, but it is never
+            # silent: a red run naming both commits.
+            parent=$(gh api "/repos/$REPO/commits/${merged#* }" --jq '.parents[0].sha // empty' 2>/dev/null || true)
+            if ! [[ "$parent" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::warning::#$PR_NUMBER merged as ${merged#* }, but its parent could not be read to confirm the evaluated base ${PINNED_BASE:0:7}."
+            elif [ "$parent" != "$PINNED_BASE" ]; then
+              echo "::error::#$PR_NUMBER merged as ${merged#* } onto ${parent:0:7}, not the evaluated base ${PINNED_BASE:0:7}: the base moved inside the merge round trip. The merge stands; check it."
+              exit 1
+            fi
             # The head branch is left to the repo's "delete branch on merge"
             # setting: deleting the ref here would close any PR stacked on it,
             # where GitHub's own deletion retargets them.
-            say "merged as ${merged#* } (documentation-only, CI green, no review required by policy)."
+            say "merged as ${merged#* } onto ${PINNED_BASE:0:7} (documentation-only, CI green, no review required by policy)."
           }
 
           # Which PRs this event is about. A CI completion names every PR at
