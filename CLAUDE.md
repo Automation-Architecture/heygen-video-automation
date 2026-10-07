@@ -52,18 +52,12 @@ Directives are living documents. When you discover API constraints, better appro
 **4. Keep README.md in sync**
 When user-facing behavior changes — new avatars, script flow changes, API endpoint updates, setup requirements — update `README.md` alongside the relevant directive. The README is the human-readable front door to this project and should always reflect how the system actually works.
 
-**5. Request Copilot review on every PR, then trigger auto-fix**
-After creating a pull request:
+**5. Codex reviews every PR; merge on the org gate**
+Codex reviews each PR automatically when it opens; there is no need to request a reviewer. Copilot review is not part of the merge policy, so don't request it or wait on it. Once Codex has reviewed the current head, no P0/P1 finding is open and CI is green:
 ```bash
-# 1. Request review
-gh pr edit <number> --add-reviewer Copilot
-
-# 2. Poll for Copilot's comment, then auto-post "@Copilot fix"
-python3 execution/poll_copilot_review.py \
-  --repo <owner/repo> \
-  --pr <number>
+gh pr merge <number> --squash --match-head-commit <head-sha>
 ```
-`poll_copilot_review.py` waits up to 30 minutes for Copilot to comment, then posts `@copilot open a new pull request to apply changes based on the comments in this thread` — this tells Copilot to open a separate fix PR rather than attempting an inline patch.
+Merge policy: Codex is the one required reviewer, and the org ruleset `aaa-agency-delivery-gate` requires the `agency-delivery/gate` check on the default branch, with no bypass (admins included). Merge once Codex has reviewed the current head, no P0/P1 finding is open and CI is green; P2/P3 findings get one fix round, then merge and put leftovers in a follow-up issue. Never use `--admin`. No human approval is required. Markdown-only PRs are merged by the central doc sweep (`.github` repo). Canonical page: aaa-runbooks `reference/merge-gate-target-system.md`.
 
 ## Self-Annealing Loop
 
