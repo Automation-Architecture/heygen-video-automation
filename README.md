@@ -114,4 +114,4 @@ Both paths use the same `execution/poll_heygen_video.py` for status polling.
 
 ## Maintaining This README
 
-This README should stay in sync with `CLAUDE.md` and the directives in `directives/`. When the user flow changes — new avatars, new script steps, API endpoint changes — update this file alongside the relevant directive.
+This README should stay in sync with `AGENTS.md` (the agent instructions; `CLAUDE.md` imports it) and the directives in `directives/`. When the user flow changes — new avatars, new script steps, API endpoint changes — update this file alongside the relevant directive.

@@ -147,7 +147,7 @@ Output includes `"data": {...}` — the full API response. Inspect the `data` di
 Update these files with the new look ID (and group ID):
 - `directives/avatar_personas.md` — Bob's Avatar ID → new look ID; add Group ID note
 - `directives/create_avatar_video.md` — Step 0 avatar table
-- `CLAUDE.md` — Avatar table
+- `AGENTS.md` — Avatar table (`CLAUDE.md` only imports it)
 
 ### Step 11: Validate New ID
 

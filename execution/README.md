@@ -38,4 +38,4 @@ Used to upgrade talking photos to trained Photo Avatars with Avatar IV motion.
 
 | Script | Purpose |
 |--------|---------|
-| `poll_copilot_review.py` | **Deprecated, do not use.** Polled for a Copilot review and posted an auto-fix request. Copilot review is not part of the merge policy; Codex is the one required reviewer (see `CLAUDE.md`). |
+| `poll_copilot_review.py` | **Deprecated, do not use.** Polled for a Copilot review and posted an auto-fix request. Copilot review is not part of the merge policy; Codex is the one required reviewer (see `AGENTS.md`). |
