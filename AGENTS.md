@@ -5,7 +5,7 @@ You operate within a 3-layer architecture: directives (what to do), orchestratio
 ## This Project
 HeyGen avatar video generation triggered directly from OpenAI Codex or Claude Code.
 
-**To create a video:** use `$create-video [optional topic]`, or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
+**To create a video:** use `/create-video [optional topic]` (Claude Code) or `$create-video` (Codex), or read `directives/create_avatar_video.md` and follow it. Always present the avatar menu (Step 0) and confirm selection with the user before working on the script or triggering the workflow.
 
 **Two render paths** (Step 2 in the directive asks the user to choose):
 - **Fast path** (~1 min): `execution/generate_heygen_video_v2.py` — V2 endpoint + Avatar IV engine. Single talking-head scene with photorealistic motion. Requires `voice_id` per avatar (defined in `directives/avatar_personas.md`).
@@ -61,6 +61,9 @@ Directives are living documents. When you discover API constraints, better appro
 **4. Keep README.md in sync**
 When user-facing behavior changes — new avatars, script flow changes, API endpoint updates, setup requirements — update `README.md` alongside the relevant directive. The README is the human-readable front door to this project and should always reflect how the system actually works.
 
+**5. Codex reviews every PR; merge on the org gate**
+Every PR goes through the org Merge Gate (`agency-delivery/gate`, required on the default branch by the org ruleset, no bypass). Add the `review:codex` label when opening the PR; Codex is the only reviewer (don't request Copilot or others). Codex reviews twice: the PR, then the changes since. Once the gate passes on the current head, CI is green and every conversation is resolved, the PR's owner merges by hand with `aaa-merge <number>` (a squash pinned to the reviewed head). Never use `--admin` or `--auto`. No human approval is required. Findings left after round two go in a Linear follow-up task, never a GitHub issue. How-to: aaa-SOP `pr-review-and-merge-sop.md`.
+
 ## Self-Annealing Loop
 
 Errors are learning opportunities. When something breaks:
@@ -80,3 +83,4 @@ Errors are learning opportunities. When something breaks:
 - `.claude/skills/` — Claude Code skills (`.claude/skills/create-video/SKILL.md`)
 - `.tmp/` — Intermediate files, never committed, always regeneratable
 - `.env` — API keys and config
+- `.mcp.json` — Project-scoped MCP config (empty; defers to the global config)
